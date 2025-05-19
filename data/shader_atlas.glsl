@@ -850,7 +850,6 @@ void main()
 #define MAX_LIGHTS 100
 #define MAX_SHADOW_CASTERS 4
 
-
 mat3 cotangentFrame(vec3 N, vec3 p, vec2 uv) {
   // get edge vectors of the pixel triangle
   vec3 dp1 = dFdx(p);
@@ -874,6 +873,25 @@ vec3 perturbNormal(vec3 N, vec3 WP, vec2 uv, vec3 normal_pixel)
 	normal_pixel = normal_pixel * 255./127. - 128./127.;
 	mat3 TBN = cotangentFrame(N, WP, uv);
 	return normalize(TBN * normal_pixel);
+}
+
+// Exercice 3.1
+vec3 degamma(vec3 c) {
+    return pow(c, vec3(2.2));
+}
+
+vec3 gamma(vec3 c) {
+    return pow(c, vec3(1.0 / 2.2));
+}
+
+// Exercice 3.3
+vec3 tonemapACES(vec3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
 }
 
 // Inputs from vertex shader
@@ -924,10 +942,14 @@ uniform sampler2D u_ssao_tex;
 void main() {
     // Get the base color
     vec4 tex_color = texture(u_texture, v_uv);
-    vec4 color = tex_color * u_color;
+    vec4 colorNL = tex_color * u_color;
+
+	float alpha = colorNL.a;
+
+	vec3 color = degamma(colorNL.rgb);
 
 	// Discard the fragment if its alpha is below the cutoff (transparent)
-    if (color.a < u_alpha_cutoff)
+    if (alpha < u_alpha_cutoff)
         discard;
 
     vec3 base_color = color.rgb;
@@ -954,6 +976,8 @@ void main() {
 
 	// Loop through all lights and calculate their contribution
     for (int i = 0; i < u_numLights; i++) {
+
+		vec3 light_color = degamma(u_light_color[i]);
 
         float shadow_factor = 1.0; // Default: no shadow
 
@@ -1019,8 +1043,8 @@ void main() {
 		float R_dot_V = clamp(dot(R, V), 0.0, 1.0); // View reflection term
 
 		// Diffuse and specular lighting contributions
-		vec3 light_diffuse = base_color * N_dot_L * u_light_color[i] * u_light_intensity[i] * attenuation;
-		vec3 light_specular = base_color * u_light_color[i] * u_light_intensity[i] * attenuation * pow(R_dot_V, u_shininess);
+		vec3 light_diffuse = base_color * N_dot_L * light_color * u_light_intensity[i] * attenuation;
+		vec3 light_specular = base_color * light_color * u_light_intensity[i] * attenuation * pow(R_dot_V, u_shininess);
 
 		// Apply shadow factor to light if shadow exists
 		if (i < u_numShadowCasters &&(u_light_type[i]==1 || u_light_type[i]==2) ){
@@ -1036,7 +1060,8 @@ void main() {
 
 	// Final color calculation with ambient, diffuse, and specular components
 	vec3 final_color = ambient + (diffuse_total + specular_total);
-    FragColor = vec4(final_color, color.a);
+	vec3 final_color_tonemapped = tonemapACES(final_color);
+    FragColor = vec4(gamma(final_color_tonemapped), alpha);
 	NormalColor = vec4(v_normal * 0.5 + 0.5,1.0); // Store normal in NormalColor for debugging
 }
 
@@ -1114,7 +1139,7 @@ uniform sampler2D u_texture_normal;
 
 // Light info
 
-uniform vec3 u_light_pos;
+uniform vec3 u_light_pos; 
 uniform vec3 u_light_color;	
 uniform float u_light_intensity;
 uniform int u_light_type; // 0 = point, 1 = directional, 2 = spotlight
