@@ -11,7 +11,7 @@ quad quad.vs quad.fs
 light_volume basic.vs phong_sphere.fs
 brdf basic.vs brdf.fs
 ssao quad.vs ssao.fs
-
+ssao_blur quad.vs ssao_blur.fs
 
 
 \PBR_functions
@@ -428,6 +428,10 @@ uniform sampler2D u_gbuffer_color;
 uniform sampler2D u_gbuffer_normal;
 uniform sampler2D u_gbuffer_depth;
 
+uniform sampler2D u_gbuffer_baked_ao;  
+uniform sampler2D u_ssao_tex;         
+
+
 uniform samplerCube u_sky_text;
 
 uniform mat4 u_inv_viewprojection;
@@ -442,6 +446,10 @@ void main() {
 
 	//Assigment 4 getting data from gbuffer
 	vec2 uv = gl_FragCoord.xy * u_inv_screen_size;
+
+	float ssao   = texture(u_ssao_tex,         uv).r;
+    float baked  = texture(u_gbuffer_baked_ao, uv).r;
+	float ao = min(ssao, baked);
 
 	float depth = texture(u_gbuffer_depth, uv).r;
 	float depth_clip = depth * 2.0 - 1.0;
@@ -470,7 +478,7 @@ void main() {
     // Ambient term calculation
     vec3 ambient = vec3(0.0);
 	if (u_apply_ambient && u_first_pass) {
-		ambient = u_ambient_light * base_color;
+		ambient = u_ambient_light * base_color * ao;
 	}
 
 	// Initialize lighting accumulators
@@ -652,6 +660,9 @@ uniform bool u_compressnormals;
 uniform float u_roughness;
 uniform float u_metallic;
 
+uniform sampler2D u_texture_metallic_roughness;  // <<< añádelo
+
+
 vec2 encode (vec3 n)
 {
     float kPI = 3.1415926535897932384626433832795;
@@ -692,6 +703,8 @@ float dither4x4(vec2 position, float brightness)
 
 layout(location = 0) out vec4 FragColor;
 layout(location = 1) out vec4 NormalColor;
+layout(location=2) out vec4 BakedAO;
+
 void main()
 {
 	vec2 uv = v_uv;
@@ -717,6 +730,9 @@ void main()
 		vec2 compressnormal = encode(normal);
 		NormalColor = vec4(compressnormal, 0.0,u_metallic);
 	}
+
+	float baked = texture(u_texture_metallic_roughness, v_uv).r;
+	BakedAO = vec4(baked, baked, baked, 1.0);
 	
 }
 
@@ -1397,4 +1413,22 @@ void main() {
     // normalize and output
     occlusion /= float(u_sample_count);
     FragColor = vec4(vec3(occlusion), 1.0);
+}
+\ssao_blur.fs
+#version 330 core
+in vec2 v_uv;
+layout(location=0) out vec4 FragColor;
+
+uniform sampler2D u_ssao_tex;    // SSAO low-res
+uniform vec2      u_texel_size;  // = vec2(1.0/low_w,1.0/low_h)
+
+void main() {
+    float sum = 0.0;
+    // box-blur 3×3
+    for(int dx=-1; dx<=1; ++dx)
+    for(int dy=-1; dy<=1; ++dy) {
+        sum += texture(u_ssao_tex, v_uv + vec2(dx,dy) * u_texel_size).r;
+    }
+    float occl = sum / 9.0;
+    FragColor = vec4(occl,occl,occl,1.0);
 }

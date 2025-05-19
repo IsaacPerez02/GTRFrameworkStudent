@@ -71,8 +71,12 @@ GFX::FBO lighting_FBO;
 // Assignment 6 – SSAO FBO
 GFX::FBO ssao_FBO;
 
-// SSAO shader
+// SSAO shade
 GFX::Shader* ssao_shader = nullptr;
+
+// SSAO blur FBO (full-res) y shader de blur
+GFX::FBO ssao_blur_FBO;
+GFX::Shader* ssao_blur_shader = nullptr;
 
 
 
@@ -109,6 +113,8 @@ Renderer::Renderer(const char* shader_atlas_filename)
 	scene = nullptr;
 	skybox_cubemap = nullptr;
 
+
+
 	if (!GFX::Shader::LoadAtlas(shader_atlas_filename))
 		exit(1);
 	GFX::checkGLErrors();
@@ -116,6 +122,12 @@ Renderer::Renderer(const char* shader_atlas_filename)
 	ssao_shader = GFX::Shader::Get("ssao");
 	if (!ssao_shader) {
 		std::cerr << "Error: no se pudo cargar el shader ssao\n";
+		exit(1);
+	}
+
+	ssao_blur_shader = GFX::Shader::Get("ssao_blur");
+	if (!ssao_blur_shader) {
+		std::cerr << "Error: no se pudo cargar ssao_blur\n";
 		exit(1);
 	}
 
@@ -129,23 +141,36 @@ Renderer::Renderer(const char* shader_atlas_filename)
 
 	//Initiallize G fbo
 	gbuffer_FBO.create(1024, 768,
-		2, // Create two texture to render to
+		3, // Create two texture to render to
 		GL_RGBA, // Each texture has an R G B and A channels
 		GL_HALF_FLOAT, // Uses 8 bits per channel
 		true); 
+
+
+
 	lighting_FBO.create(1024, 768,
 		1, // Create one texture to render to
 		GL_RGBA, // Each texture has an R G B and A channels
 		GL_FLOAT, // Uses 8 bits per channel, we have to try more
 		true); 
+
+	int w = gbuffer_FBO.width;
+	int h = gbuffer_FBO.height;
 	// SSAO FBO (solo un canal, puedes hacerlo a mitad de resolución si quieres)
 	ssao_FBO.create(
-		gbuffer_FBO.width,                   // ancho del FBO
-		gbuffer_FBO.height,                  // alto del FBO
-		1,                                   // solo una textura
-		GL_RGB,                              // canal único R
-		GL_UNSIGNED_BYTE,                    // 8 bits, suficiente para AO
-		false                                // sin depth buffer
+		w / 2, h / 2,
+		1,           // sólo un canal
+		GL_RGB,      // R
+		GL_UNSIGNED_BYTE,
+		false        // sin depth
+	);
+
+	ssao_blur_FBO.create(
+		w, h,
+		1,
+		GL_RGB,
+		GL_UNSIGNED_BYTE,
+		false
 	);
 	ssao_kernel = generateSpherePoints(ssao_sample_count, 1.0f, false);
 
@@ -324,9 +349,8 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 	
 	if (use_deferred_rendering) {
 		// Same for quad
-		for (sDrawCommand command : opaqueNodes) {
-			Renderer::renderQuadWithGFBO(command.model, command.mesh, command.material, true); //True for first pass(directional and ambient only)
-		}
+		Renderer::renderQuadWithGFBO(opaqueNodes[0].model, opaqueNodes[0].mesh, opaqueNodes[0].material, true); //True for first pass(directional and ambient only)
+
 
 		// Then render all transparent objects
 		for (sDrawCommand command : transparentNodes) {
@@ -744,6 +768,11 @@ void Renderer::renderQuadWithGFBO(const Matrix44 model, GFX::Mesh* mesh, SCN::Ma
 		shader->setTexture("u_gbuffer_normal", gbuffer_FBO.color_textures[1], 1);
 		shader->setTexture("u_gbuffer_depth", gbuffer_FBO.depth_texture, 2);
 
+		// justo antes de renderizar quad:
+		shader->setTexture("u_ssao_tex", ssao_blur_FBO.color_textures[0], 4);
+		shader->setTexture("u_gbuffer_baked_ao", gbuffer_FBO.color_textures[2], 3);
+
+
 
 		//pass to do only ambient + directional + skybox
 		shader->setUniform("u_first_pass", firstlightingpass);
@@ -1063,6 +1092,15 @@ void Renderer::renderMeshwithTexture(const Matrix44 model, GFX::Mesh* mesh, SCN:
 	shader->setUniform("u_model", model);
 	bool is_dithered_transparent = material->alpha_cutoff < 0.6f && material->alpha_cutoff > 0.0f && ditering;
 	shader->setUniform("u_transparent", is_dithered_transparent);
+
+	if (material->textures[SCN::METALLIC_ROUGHNESS].texture) {
+		shader->setTexture(
+			"u_texture_metallic_roughness",
+			material->textures[SCN::METALLIC_ROUGHNESS].texture,
+			1
+		);
+	}
+
 	// Upload camera uniforms
 	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
 	shader->setUniform("u_camera_position", camera->eye);
@@ -1138,39 +1176,68 @@ void Renderer::renderToShadowMap() {
 }
 
 void Renderer::renderSSAO(Camera* camera) {
+	GFX::Mesh* quad = GFX::Mesh::getQuad();
 
+	// 1) PASO SSAO a mitad de resolución
 	ssao_FBO.bind();
 	glViewport(0, 0, ssao_FBO.width, ssao_FBO.height);
-
 	glClearColor(0, 0, 0, 1);
 	glClear(GL_COLOR_BUFFER_BIT);
 
 	ssao_shader->enable();
+	// texturas G-buffer
 	ssao_shader->setTexture("u_normal_tex", gbuffer_FBO.color_textures[1], 1);
-	ssao_shader->setUniform("u_use_ssao_plus", use_ssao_plus ? 1 : 0);
-
-
 	ssao_shader->setTexture("u_depth_tex", gbuffer_FBO.depth_texture, 0);
-	ssao_shader->setUniform("u_res_inv", Vector2f(1.0f / ssao_FBO.width, 1.0f / ssao_FBO.height));
+	// parámetros SSAO
+	ssao_shader->setUniform("u_use_ssao_plus", use_ssao_plus ? 1 : 0);
+	ssao_shader->setUniform("u_res_inv",
+		Vector2f(1.0f / ssao_FBO.width,
+			1.0f / ssao_FBO.height)
+	);
 	ssao_shader->setUniform("u_sample_count", ssao_sample_count);
 	ssao_shader->setUniform("u_sample_radius", ssao_radius);
-	ssao_shader->setUniform3Array("u_sample_pos",
+	ssao_shader->setUniform3Array(
+		"u_sample_pos",
 		reinterpret_cast<float*>(ssao_kernel.data()),
-		ssao_sample_count);
+		ssao_sample_count
+	);
+	// matrices
 	ssao_shader->setUniform("u_p_mat", camera->projection_matrix);
 	Matrix44 invP = camera->projection_matrix; invP.inverse();
 	ssao_shader->setUniform("u_inv_p_mat", invP);
 
 	glDisable(GL_DEPTH_TEST);
-	GFX::Mesh* quad = GFX::Mesh::getQuad();
 	quad->render(GL_TRIANGLES);
 	glEnable(GL_DEPTH_TEST);
-
-	// 7) cleanup
 	ssao_shader->disable();
 	ssao_FBO.unbind();
 
+
+	// 2) PASO de BLUR a resolución completa
+	ssao_blur_FBO.bind();
+	glViewport(0, 0, gbuffer_FBO.width, gbuffer_FBO.height);
+	glClear(GL_COLOR_BUFFER_BIT);
+
+	ssao_blur_shader->enable();
+	// toma como entrada el SSAO low-res
+	ssao_blur_shader->setTexture("u_ssao_tex", ssao_FBO.color_textures[0], 0);
+	// texel size en la baja resolución
+	ssao_blur_shader->setUniform("u_texel_size",
+		Vector2f(1.0f / ssao_FBO.width,
+			1.0f / ssao_FBO.height)
+	);
+
+	glDisable(GL_DEPTH_TEST);
+	quad->render(GL_TRIANGLES);
+	glEnable(GL_DEPTH_TEST);
+	ssao_blur_shader->disable();
+	ssao_blur_FBO.unbind();
+
+
+	// 3) Mostrar el SSAO ya filtrado
+	ssao_blur_FBO.color_textures[0]->toViewport();
 }
+
 
 
 void Renderer::renderPlain(const Camera& C,
