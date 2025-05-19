@@ -267,18 +267,13 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 	
 	if (use_deferred_rendering) {
 		// Same for quad
-		for (sDrawCommand command : opaqueNodes) {
-			Renderer::renderQuadWithGFBO(command.model, command.mesh, command.material, true); //True for first pass(directional and ambient only)
-		}
-
-		// Then render all transparent objects
-		for (sDrawCommand command : transparentNodes) {
-			Renderer::renderQuadWithGFBO(command.model, command.mesh, command.material, true);
-		}
+		Renderer::renderQuadWithGFBO(opaqueNodes[0].model, opaqueNodes[0].mesh, opaqueNodes[0].material, true); //True for first pass(directional and ambient only)
+		
 
 
 
 		Renderer::rendertoLightFBO(); //True for first pass(directional and ambient only)
+
 		for (sDrawCommand command : transparentNodes) {
 			Renderer::renderMeshWithMaterial(command.model, command.mesh, command.material);
 		}
