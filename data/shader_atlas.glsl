@@ -10,6 +10,7 @@ phong basic.vs phong.fs
 quad quad.vs quad.fs
 light_volume basic.vs phong_sphere.fs
 brdf basic.vs brdf.fs
+ssao quad.vs ssao.fs
 
 
 
@@ -849,7 +850,6 @@ void main()
 #define MAX_LIGHTS 100
 #define MAX_SHADOW_CASTERS 4
 
-
 mat3 cotangentFrame(vec3 N, vec3 p, vec2 uv) {
   // get edge vectors of the pixel triangle
   vec3 dp1 = dFdx(p);
@@ -873,6 +873,25 @@ vec3 perturbNormal(vec3 N, vec3 WP, vec2 uv, vec3 normal_pixel)
 	normal_pixel = normal_pixel * 255./127. - 128./127.;
 	mat3 TBN = cotangentFrame(N, WP, uv);
 	return normalize(TBN * normal_pixel);
+}
+
+// Exercice 3.1
+vec3 degamma(vec3 c) {
+    return pow(c, vec3(2.2));
+}
+
+vec3 gamma(vec3 c) {
+    return pow(c, vec3(1.0 / 2.2));
+}
+
+// Exercice 3.3
+vec3 tonemapACES(vec3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
 }
 
 // Inputs from vertex shader
@@ -917,24 +936,34 @@ out vec4 FragColor; // Final color output
    // color buffer
 layout(location = 1) out vec4 NormalColor;  // normal buffer
 
+// SSAO Texture
+uniform sampler2D u_ssao_tex;
+
 void main() {
     // Get the base color
     vec4 tex_color = texture(u_texture, v_uv);
-    vec4 color = tex_color * u_color;
+    vec4 colorNL = tex_color * u_color;
+
+	float alpha = colorNL.a;
+
+	vec3 color = degamma(colorNL.rgb);
 
 	// Discard the fragment if its alpha is below the cutoff (transparent)
-    if (color.a < u_alpha_cutoff)
+    if (alpha < u_alpha_cutoff)
         discard;
 
     vec3 base_color = color.rgb;
 
 	// Store base color for gFBO
 
+	float ao = texture(u_ssao_tex, v_uv).r;
+
     // Ambient term calculation
     vec3 ambient = vec3(0.0);
 	if (u_apply_ambient) {
-		ambient = u_ambient_light * base_color;
+		ambient = u_ambient_light * base_color * ao;
 	}
+
 
 	// Initialize lighting accumulators
     vec3 diffuse_total = vec3(0.0);
@@ -947,6 +976,8 @@ void main() {
 
 	// Loop through all lights and calculate their contribution
     for (int i = 0; i < u_numLights; i++) {
+
+		vec3 light_color = degamma(u_light_color[i]);
 
         float shadow_factor = 1.0; // Default: no shadow
 
@@ -1012,8 +1043,8 @@ void main() {
 		float R_dot_V = clamp(dot(R, V), 0.0, 1.0); // View reflection term
 
 		// Diffuse and specular lighting contributions
-		vec3 light_diffuse = base_color * N_dot_L * u_light_color[i] * u_light_intensity[i] * attenuation;
-		vec3 light_specular = base_color * u_light_color[i] * u_light_intensity[i] * attenuation * pow(R_dot_V, u_shininess);
+		vec3 light_diffuse = base_color * N_dot_L * light_color * u_light_intensity[i] * attenuation;
+		vec3 light_specular = base_color * light_color * u_light_intensity[i] * attenuation * pow(R_dot_V, u_shininess);
 
 		// Apply shadow factor to light if shadow exists
 		if (i < u_numShadowCasters &&(u_light_type[i]==1 || u_light_type[i]==2) ){
@@ -1029,7 +1060,8 @@ void main() {
 
 	// Final color calculation with ambient, diffuse, and specular components
 	vec3 final_color = ambient + (diffuse_total + specular_total);
-    FragColor = vec4(final_color, color.a);
+	vec3 final_color_tonemapped = tonemapACES(final_color);
+    FragColor = vec4(gamma(final_color_tonemapped), alpha);
 	NormalColor = vec4(v_normal * 0.5 + 0.5,1.0); // Store normal in NormalColor for debugging
 }
 
@@ -1107,7 +1139,7 @@ uniform sampler2D u_texture_normal;
 
 // Light info
 
-uniform vec3 u_light_pos;
+uniform vec3 u_light_pos; 
 uniform vec3 u_light_color;	
 uniform float u_light_intensity;
 uniform int u_light_type; // 0 = point, 1 = directional, 2 = spotlight
@@ -1272,3 +1304,97 @@ void main() {
     FragColor = vec4(light_specular + light_diffuse, color.a);
 }
 
+\ssao.fs
+#version 330 core
+
+in vec2 v_uv;
+layout(location = 0) out vec4 FragColor;
+
+// G-buffer inputs
+uniform sampler2D u_depth_tex;    // depth buffer (0..1)
+uniform sampler2D u_normal_tex;   // normal buffer (encoded 0..1)
+
+// Noise texture to rotate samples per fragment
+uniform sampler2D u_noise_tex;
+uniform vec2     u_noise_scale;   // = screenSize / noiseSize
+
+// Inverse resolution (1 / screenSize)
+uniform vec2     u_res_inv;
+
+// SSAO params
+uniform int      u_sample_count;
+uniform float    u_sample_radius;
+uniform float    u_ssao_bias;
+uniform bool     u_use_ssao_plus;
+
+// Camera matrices
+uniform mat4     u_p_mat;
+uniform mat4     u_inv_p_mat;
+
+// Sample points in sphere or hemisphere (radius = 1.0)
+uniform vec3     u_sample_pos[64];
+
+// Reconstruct view-space Z from depth buffer
+float reconstructDepth(vec2 uv) {
+    float z = texture(u_depth_tex, uv).r;
+    float z_ndc = z * 2.0 - 1.0;
+    vec4 clip = vec4(uv * 2.0 - 1.0, z_ndc, 1.0);
+    vec4 view = u_inv_p_mat * clip;
+    return view.z / view.w;
+}
+
+// Reconstruct full view-space position
+vec3 reconstructViewPos(vec2 uv) {
+    float z = texture(u_depth_tex, uv).r;
+    float z_ndc = z * 2.0 - 1.0;
+    vec4 clip = vec4(uv * 2.0 - 1.0, z_ndc, 1.0);
+    vec4 view = u_inv_p_mat * clip;
+    return view.xyz / view.w;
+}
+
+void main() {
+    // center UV to the texel center
+    vec2 uv = v_uv + 0.5 * u_res_inv;
+
+    // view-space position and normal
+    vec3 P = reconstructViewPos(uv);
+    vec3 N = texture(u_normal_tex, uv).rgb * 2.0 - 1.0;
+
+    // build TBN if using SSAO+
+    mat3 TBN = mat3(1.0);
+    if (u_use_ssao_plus) {
+        vec3 rand = texture(u_noise_tex, uv * u_noise_scale).xyz * 2.0 - 1.0;
+        vec3 tangent = normalize(rand - N * dot(rand, N));
+        vec3 bitan   = cross(N, tangent);
+        TBN = mat3(tangent, bitan, N);
+    }
+
+    float occlusion = 0.0;
+    for (int i = 0; i < u_sample_count; ++i) {
+        vec3 samp = u_sample_pos[i];
+        if (u_use_ssao_plus) {
+            samp = TBN * samp;
+        }
+
+        vec3 samplePos = P + samp * u_sample_radius;
+
+        // project sample position
+        vec4 proj = u_p_mat * vec4(samplePos, 1.0);
+        proj.xyz /= proj.w;
+        vec2 uvSample = proj.xy * 0.5 + 0.5;
+
+        // skip samples outside the screen
+        if (uvSample.x < 0.0 || uvSample.x > 1.0 ||
+            uvSample.y < 0.0 || uvSample.y > 1.0)
+            continue;
+
+        float sampleDepth = reconstructDepth(uvSample);
+        // accumulate occlusion
+        if (sampleDepth + u_ssao_bias < samplePos.z)
+            occlusion += 1.0;
+    }
+
+    // normalize and output
+    occlusion /= float(u_sample_count);
+    FragColor = vec4(vec3(occlusion), 1.0);
+}
