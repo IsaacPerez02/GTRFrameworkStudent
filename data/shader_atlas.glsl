@@ -319,7 +319,7 @@ uniform float u_time;
 
 void main()
 {	
-	//calcule the normal in camera space (the NormalMatrix is like ViewMatrix but without traslation)
+
 	v_normal = (u_model * vec4( a_normal, 0.0) ).xyz;
 	
 	//calcule the vertex in object space
@@ -660,7 +660,7 @@ uniform bool u_compressnormals;
 uniform float u_roughness;
 uniform float u_metallic;
 
-uniform sampler2D u_texture_metallic_roughness;  // <<< añádelo
+uniform sampler2D u_texture_metallic_roughness;
 
 
 vec2 encode (vec3 n)
