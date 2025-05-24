@@ -68,6 +68,9 @@ GFX::FBO gbuffer_FBO;
 //Store the FBO for lighting pass
 GFX::FBO lighting_FBO;
 
+//store final render
+GFX::FBO final_render_FBO;
+
 // Assignment 6 – SSAO FBO
 GFX::FBO ssao_FBO;
 
@@ -146,6 +149,13 @@ Renderer::Renderer(const char* shader_atlas_filename)
 		GL_RGB,                              // canal único R
 		GL_UNSIGNED_BYTE,                    // 8 bits, suficiente para AO
 		false                                // sin depth buffer
+	);
+	final_render_FBO.create(
+		1024, 768,                  // alto del FBO
+		1,                                   // solo una textura
+		GL_RGBA,                              // canal único R
+		GL_HALF_FLOAT,                    // 8 bits, suficiente para AO
+		true
 	);
 	ssao_kernel = generateSpherePoints(ssao_sample_count, 1.0f, false);
 
@@ -334,6 +344,25 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 		for (sDrawCommand command : transparentNodes) {
 			Renderer::renderMeshWithMaterial(command.model, command.mesh, command.material);
 		}
+
+		//BlackHole
+		vec3 blackhole_pos = vec3(1.0f, 1.0f, 1.0f); 
+
+		sDrawCommand blackhole_com;
+		GFX::Mesh* blackhole = new GFX::Mesh();
+		blackhole->GFX::Mesh::createSphere(5, 10, 10);
+		blackhole_com.mesh = blackhole;
+
+		// Position the sphere
+		blackhole_com.model.translate(blackhole_pos.x,blackhole_pos.y,blackhole_pos.z);
+
+
+		Material* mat = new Material();
+		mat->color = vec4(1.0,1.0,1.0, 1.0);
+		blackhole_com.material = mat;
+
+		
+		Renderer::blackHoleRender(blackhole_com.model, blackhole_com.mesh, blackhole_com.material, blackhole_com.model.getTranslation());
 	}
 		
 	
@@ -596,6 +625,9 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, GFX::Mesh* mesh, SCN
 //Render the scene using a quad and gFBO assigment 4
 void Renderer::renderQuadWithGFBO(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, bool firstlightingpass)
 {
+	//Render to final Fbo
+	final_render_FBO.bind();
+	glViewport(0, 0, final_render_FBO.width, final_render_FBO.height);
 	//in case there is nothing to do
 	if (!mesh || !mesh->getNumVertices() || !material)
 		return;
@@ -618,9 +650,11 @@ void Renderer::renderQuadWithGFBO(const Matrix44 model, GFX::Mesh* mesh, SCN::Ma
 	//Assigmet 4 creation of quad
 	GFX::Mesh* quad = GFX::Mesh::getQuad();
 
+
 	// Activate the shader
 	shader->enable();
 
+	
 	// Define shadow map uniforms
 	static const char* shadowNames[MAX_SHADOW_CASTERS] = {
 			"u_shadow_maps[0]",
@@ -650,6 +684,7 @@ void Renderer::renderQuadWithGFBO(const Matrix44 model, GFX::Mesh* mesh, SCN::Ma
 
 	//To use bdrf or not
 	shader->setUniform("u_brdf", brdf);
+
 
 	// Prepare light information
 	const int MAX_LIGHTS = 100;
@@ -749,16 +784,19 @@ void Renderer::renderQuadWithGFBO(const Matrix44 model, GFX::Mesh* mesh, SCN::Ma
 		shader->setUniform("u_inv_viewprojection", camera->viewprojection_matrix);
 		camera->viewprojection_matrix.inverse();
 		// Render mesh
+		glDisable(GL_DEPTH_TEST);
 		if (render_wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 		quad->render(GL_TRIANGLES);
+		glEnable(GL_DEPTH_TEST);
 	}
-
+	
 	//disable shader
 	shader->disable();
 
 	//set the render state as it was before to avoid problems with future renders
 	glDisable(GL_BLEND);
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	final_render_FBO.unbind();
 }
 #ifndef SKIP_IMGUI
 
@@ -1016,7 +1054,9 @@ void Renderer::rendertoLightFBO() {
 	}
 	shader->disable();
 	lighting_FBO.unbind();
+	final_render_FBO.bind();
 	lighting_FBO.color_textures[0]->toViewport();
+	final_render_FBO.unbind();
 	glDepthMask(GL_TRUE);
 	glDepthFunc(GL_LESS);
 
@@ -1239,6 +1279,47 @@ void Renderer::createSpheresOfLights(std::vector<SCN::LightEntity*> lights) {
 	}
 }
 
+void Renderer::blackHoleRender(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, vec3 pos_hole) {
+	// 1. Ensure we have the fullscreen quad mesh
+	GFX::Mesh* quad = GFX::Mesh::getQuad(); // screen-space quad
+
+	// 2. Get the shader
+	GFX::Shader* shader = GFX::Shader::Get("black_hole");
+	if (!shader || !quad)
+		return;
+
+	
+	// 3. Enable shader
+	shader->enable();
+
+	// 4. Set screen texture (the final rendered texture)
+	shader->setTexture("u_scene_texture", final_render_FBO.color_textures[0], 0);
+	shader->setTexture("u_depth_texture", gbuffer_FBO.depth_texture, 1); // needed to reconstruct world pos
+
+	// 5. Set black hole position in world space
+	shader->setUniform3("u_blackhole_world_pos", pos_hole);
+
+	// 6. Set camera matrices for world position reconstruction
+	Camera* camera = Camera::current;
+	Matrix44 inv_viewproj = camera->viewprojection_matrix;
+	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+	inv_viewproj.inverse(); // make sure it's correct
+	shader->setUniform("u_inv_viewprojection", inv_viewproj);
+
+	// 7. Screen size (for reconstructing clip space coords)
+	shader->setUniform("u_inv_screen_size", Vector2f(1.0f / final_render_FBO.width, 1.0f / final_render_FBO.height));
+
+	// 8. Set distortion parameters
+	shader->setUniform("u_blackhole_radius", 40.0f);          // tweak as needed
+	shader->setUniform("u_distortion_strength", 0.1f);       // tweak as needed
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	//mesh->render(GL_TRIANGLES); efecto guapisimo
+	// 9. Draw fullscreen quad
+	quad->render(GL_TRIANGLES);
+
+	// 10. Cleanup
+	shader->disable();
+}
 
 
 
