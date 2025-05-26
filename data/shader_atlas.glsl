@@ -26,7 +26,7 @@ out vec4 FragColor;
 uniform vec3 u_blackhole_world_pos;
 uniform float u_blackhole_radius;
 uniform float u_distortion_strength;
-
+uniform float u_effect_radius;
 
 uniform sampler2D u_scene_texture; // G-buffer color texture
 uniform sampler2D u_depth_texture; // G-buffer depth texture
@@ -67,27 +67,27 @@ void main()
     float dist = distance(frag_screen_pos, blackhole_screen_pos);
 
     // If inside black circle radius, return black
-    if (dist < u_blackhole_radius) {
-        FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    if (dist < u_blackhole_radius*3) {
+        FragColor = vec4(1.0, 1.0, 1.0, 1.0);
         return;
     }
+	
 	dist = length(world_pos - u_blackhole_world_pos);
-	/*
-	if (dist < u_blackhole_radius * 0.3) {
-        FragColor = vec4(1.0, 0.0, 0.0, 1.0); // Central void
-        return;
-    }
-	*/
-    if (dist < u_blackhole_radius) {
-        float factor = (u_blackhole_radius - dist) / u_blackhole_radius;
-        float strength = u_distortion_strength * factor * factor;
+
+    if (dist < u_effect_radius) {
+        //float factor = (u_blackhole_radius - dist) / u_blackhole_radius;
+        float strength = u_distortion_strength;// * factor;
 
         // Approximate direction of distortion in screen-space (can be tweaked)
-        vec2 dir = normalize(world_pos.xy - u_blackhole_world_pos.xy);
-        uv -= dir * strength;
+        vec2 dir = normalize(frag_screen_pos - blackhole_screen_pos);
+        uv += dir * strength * 0.5;
     }
+	vec4 color = texture(u_scene_texture, uv);
+	if (dist < u_blackhole_radius *6){
+		color += vec4(u_distortion_strength *1.1 /dist);
+	}
 
-    FragColor = texture(u_scene_texture, uv);
+    FragColor = color;
 }
 
 

@@ -38,6 +38,12 @@ std::vector<SCN::LightEntity*> lights;
 
 std::vector<sDrawCommand> lightSpheres; // Assignment 4
 
+
+float black_hole_radius = 5.0f; // Radius of the black hole sphere
+float black_hole_strength = 0.2f; // Strength of the black hole effect
+vec3 black_hole_pos = vec3(1.0f, 1.0f, 1.0f); // Position of the black hole
+float black_hole_effect_radius = 1.0f; // Radius of the black hole effect area
+
 // If true, use multipass rendering (e.g., per-light passes)
 bool use_multipass = false;
 bool use_deferred_rendering = false; // Assignment 4
@@ -364,10 +370,7 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 		
 		Renderer::blackHoleRender(blackhole_com.model, blackhole_com.mesh, blackhole_com.material, blackhole_com.model.getTranslation());
 	}
-		
-	
-	
-	
+			
 }
 
 
@@ -810,9 +813,15 @@ void Renderer::showUI()
 	ImGui::Checkbox("Use Multipass Rendering", &use_multipass);
 
 	ImGui::Checkbox("Deferred Rendering", &use_deferred_rendering);
+	ImGui::Separator();
+	ImGui::SliderFloat("Black Hole Radius", &black_hole_radius, 0.1f, 10.0f, "%.1f");
+	ImGui::SliderFloat("Black Hole Effect Radius", &black_hole_effect_radius, 0.1f, 5.0f, "%.1f");
+	ImGui::SliderFloat("Black Hole Strength", &black_hole_strength, 0.0f, 1.0f, "%.2f");
+	ImGui::InputFloat3("Black Hole Position", &black_hole_pos.x, "%.2f");
+	ImGui::Separator();
 	ImGui::Checkbox("Ditering", &ditering);
 	ImGui::Checkbox("Compress Normals", &compress_normals);
-
+	
 	ImGui::Checkbox("BRDF", &brdf);
 
 	// Slider to adjust the shadow bias
@@ -1280,44 +1289,41 @@ void Renderer::createSpheresOfLights(std::vector<SCN::LightEntity*> lights) {
 }
 
 void Renderer::blackHoleRender(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, vec3 pos_hole) {
-	// 1. Ensure we have the fullscreen quad mesh
 	GFX::Mesh* quad = GFX::Mesh::getQuad(); // screen-space quad
 
-	// 2. Get the shader
 	GFX::Shader* shader = GFX::Shader::Get("black_hole");
 	if (!shader || !quad)
 		return;
 
 	
-	// 3. Enable shader
+	
 	shader->enable();
 
-	// 4. Set screen texture (the final rendered texture)
+
 	shader->setTexture("u_scene_texture", final_render_FBO.color_textures[0], 0);
 	shader->setTexture("u_depth_texture", gbuffer_FBO.depth_texture, 1); // needed to reconstruct world pos
 
-	// 5. Set black hole position in world space
-	shader->setUniform3("u_blackhole_world_pos", pos_hole);
 
-	// 6. Set camera matrices for world position reconstruction
+
+	shader->setUniform3("u_blackhole_world_pos", black_hole_pos);
+
+
 	Camera* camera = Camera::current;
 	Matrix44 inv_viewproj = camera->viewprojection_matrix;
 	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
 	inv_viewproj.inverse(); // make sure it's correct
 	shader->setUniform("u_inv_viewprojection", inv_viewproj);
 
-	// 7. Screen size (for reconstructing clip space coords)
+
 	shader->setUniform("u_inv_screen_size", Vector2f(1.0f / final_render_FBO.width, 1.0f / final_render_FBO.height));
 
-	// 8. Set distortion parameters
-	shader->setUniform("u_blackhole_radius", 40.0f);          // tweak as needed
-	shader->setUniform("u_distortion_strength", 0.1f);       // tweak as needed
+
+	shader->setUniform("u_effect_radius", black_hole_effect_radius);
+	shader->setUniform("u_blackhole_radius", black_hole_radius);     
+	shader->setUniform("u_distortion_strength", black_hole_strength);      
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	//mesh->render(GL_TRIANGLES); efecto guapisimo
-	// 9. Draw fullscreen quad
 	quad->render(GL_TRIANGLES);
-
-	// 10. Cleanup
 	shader->disable();
 }
 
