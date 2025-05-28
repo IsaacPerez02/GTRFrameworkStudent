@@ -1271,13 +1271,17 @@ void Renderer::renderTexture(const Camera& C,
 
 }
 
+float OscillateValue(float base, float amplitude, float frequency) {
+	float t = CORE::getTime();  // tiempo en segundos
+	return base + amplitude * sin(2.0f * 3.14 * t);
+}
 void Renderer::createSpheresOfLights(std::vector<SCN::LightEntity*> lights) {
 
 	for (int i = 0; i < lights.size(); i++) {
 		if (lights[i]->light_type == eLightType::POINT) {
 			sDrawCommand draw_com;
 			GFX::Mesh* sphere = new GFX::Mesh();
-			sphere->GFX::Mesh::createSphere(lights[i]->max_distance, 10, 10);
+			sphere->GFX::Mesh::createSphere(lights[i]->max_distance, 10, 0.1);
 			draw_com.model = lights[i]->root.global_model;
 			draw_com.mesh = sphere;
 			Material* mat = new Material();
@@ -1307,7 +1311,7 @@ void Renderer::blackHoleRender(const Matrix44 model, GFX::Mesh* mesh, SCN::Mater
 
 	shader->setUniform3("u_blackhole_world_pos", black_hole_pos);
 
-
+	
 	Camera* camera = Camera::current;
 	Matrix44 inv_viewproj = camera->viewprojection_matrix;
 	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
@@ -1319,8 +1323,8 @@ void Renderer::blackHoleRender(const Matrix44 model, GFX::Mesh* mesh, SCN::Mater
 
 
 	shader->setUniform("u_effect_radius", black_hole_effect_radius);
-	shader->setUniform("u_blackhole_radius", black_hole_radius);     
-	shader->setUniform("u_distortion_strength", black_hole_strength);      
+	shader->setUniform("u_blackhole_radius", OscillateValue(black_hole_radius, 0.2f, 100.0f));
+	shader->setUniform("u_distortion_strength", OscillateValue(black_hole_strength, 0.05f, 100.0f));
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	//mesh->render(GL_TRIANGLES); efecto guapisimo
 	quad->render(GL_TRIANGLES);

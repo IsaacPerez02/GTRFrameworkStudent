@@ -71,8 +71,8 @@ namespace GFX
 			glBindTexture(colortex->texture_type, colortex->texture_id);	//we activate this id to tell opengl we are going to use this texture
 			glTexParameteri(colortex->texture_type, GL_TEXTURE_MAG_FILTER, GL_NEAREST);	//set the min filter
 			glTexParameteri(colortex->texture_type, GL_TEXTURE_MIN_FILTER, GL_NEAREST);   //set the mag filter
-			glTexParameteri(colortex->texture_type, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-			glTexParameteri(colortex->texture_type, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexParameteri(colortex->texture_type, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
+			glTexParameteri(colortex->texture_type, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT);
 		}
 
 		//is using a depth_texture slower than using a renderbuffer?
