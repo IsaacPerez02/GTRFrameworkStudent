@@ -160,7 +160,7 @@ Renderer::Renderer(const char* shader_atlas_filename)
 		1024, 768,                  // alto del FBO
 		1,                                   // solo una textura
 		GL_RGBA,                              // canal único R
-		GL_HALF_FLOAT,                    // 8 bits, suficiente para AO
+		GL_FLOAT,                    // 8 bits, suficiente para AO
 		true
 	);
 	ssao_kernel = generateSpherePoints(ssao_sample_count, 1.0f, false);
@@ -355,17 +355,17 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 		vec3 blackhole_pos = vec3(1.0f, 1.0f, 1.0f); 
 
 		sDrawCommand blackhole_com;
-		GFX::Mesh* blackhole = new GFX::Mesh();
-		blackhole->GFX::Mesh::createSphere(5, 10, 10);
-		blackhole_com.mesh = blackhole;
+		GFX::Mesh blackhole = GFX::Mesh();
+		blackhole.GFX::Mesh::createSphere(5, 10, 10);
+		blackhole_com.mesh = &blackhole;
 
 		// Position the sphere
 		blackhole_com.model.translate(blackhole_pos.x,blackhole_pos.y,blackhole_pos.z);
 
 
-		Material* mat = new Material();
-		mat->color = vec4(1.0,1.0,1.0, 1.0);
-		blackhole_com.material = mat;
+		Material mat = Material();
+		mat.color = vec4(1.0,1.0,1.0, 1.0);
+		blackhole_com.material = &mat;
 
 		
 		Renderer::blackHoleRender(blackhole_com.model, blackhole_com.mesh, blackhole_com.material, blackhole_com.model.getTranslation());

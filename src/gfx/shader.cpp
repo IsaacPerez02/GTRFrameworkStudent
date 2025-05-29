@@ -616,9 +616,7 @@ int Shader::getUniformBlockLocation(const char* varname)
 void Shader::setTexture(const char* varname, Texture* tex, int slot)
 {
 	glActiveTexture(GL_TEXTURE0 + slot);
-	glTexParameteri(tex->texture_type, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
 	glBindTexture(tex->texture_type, tex->texture_id);
-	glTexParameteri(tex->texture_type, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT); //Lo hemos añadido nosotros pa el problema de estitrarse cuando se acaba uv
 	setUniform1(varname, slot);
 	glActiveTexture(GL_TEXTURE0 + slot);
 }

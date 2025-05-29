@@ -80,6 +80,7 @@ void main()
 	dist = length(world_pos - u_blackhole_world_pos);
 
 	dist = length(blackhole_screen_pos - frag_screen_pos);
+	/*  distortion given radius
     if (dist < u_effect_radius*100) {
         //float factor = (u_blackhole_radius - dist) / u_blackhole_radius;
         float strength = u_distortion_strength;// * factor;
@@ -87,11 +88,24 @@ void main()
         // Approximate direction of distortion in screen-space (can be tweaked)
         vec2 dir = normalize(frag_screen_pos - blackhole_screen_pos);
 		//uv = frag_screen_pos;
-        uv += dir * strength * 0.5;
+        uv += dir * strength/dist*10;
     }
+	*/
+	//distortion all screen
+	//float factor = (u_blackhole_radius - dist) / u_blackhole_radius;
+    float strength = u_distortion_strength;// * factor;
+
+    // Approximate direction of distortion in screen-space (can be tweaked)
+    vec2 dir = normalize(frag_screen_pos - blackhole_screen_pos);
+	//uv = frag_screen_pos;
+	vec2 right = vec2(dir.y, -dir.x);
+
+    uv += dir * strength/dist*dist * 0.2;
+
+	uv += right * u_distortion_strength * 0.3/dist*dist * 0.2;
 	vec4 color = texture(u_scene_texture, uv);
 	if (dist < u_effect_radius *100){
-		color -= vec4(u_distortion_strength *25 /dist);
+		color += vec4(u_distortion_strength *25 /dist);
 	}
 
     FragColor = color;
