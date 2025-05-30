@@ -80,17 +80,8 @@ void main()
 	dist = length(world_pos - u_blackhole_world_pos);
 
 	dist = length(blackhole_screen_pos - frag_screen_pos);
-	/*  distortion given radius
-    if (dist < u_effect_radius*100) {
-        //float factor = (u_blackhole_radius - dist) / u_blackhole_radius;
-        float strength = u_distortion_strength;// * factor;
 
-        // Approximate direction of distortion in screen-space (can be tweaked)
-        vec2 dir = normalize(frag_screen_pos - blackhole_screen_pos);
-		//uv = frag_screen_pos;
-        uv += dir * strength/dist*10;
-    }
-	*/
+
 	//distortion all screen
 	//float factor = (u_blackhole_radius - dist) / u_blackhole_radius;
     float strength = u_distortion_strength;// * factor;
@@ -103,10 +94,36 @@ void main()
     uv += dir * strength/dist*dist * 0.2;
 
 	uv += right * u_distortion_strength * 0.3/dist*dist * 0.2;
+	
+		// Ring blending with scene
+	vec3 ring_color = vec3(0.33, 0.78, 0.9);
+	float ring_inner_radius = u_effect_radius * 100.0 + 10.0;
+	float ring_thickness = u_effect_radius * 20.0;
+	float ring_outer_radius = ring_inner_radius + ring_thickness;
+	float ring_outer_radius_negative = ring_inner_radius - ring_thickness;
+
+
 	vec4 color = texture(u_scene_texture, uv);
-	if (dist < u_effect_radius *100){
-		color += vec4(u_distortion_strength *25 /dist);
+
+	if (dist > ring_inner_radius && dist < ring_outer_radius) {
+		float t = (dist - ring_inner_radius) / ring_thickness;
+		float falloff = 1.0 - t;
+
+		float intensity_boost = 0.9;
+		vec3 blended_color = mix(color.rgb, ring_color * intensity_boost, falloff);
+		color.rgb = blended_color;
 	}
+	if (dist > ring_outer_radius_negative && dist < ring_inner_radius) {
+		float t = (dist - ring_outer_radius_negative) / ring_thickness;
+		float falloff = t;
+
+		float intensity_boost = 0.9;
+		vec3 blended_color = mix(color.rgb, ring_color * intensity_boost, falloff);
+		color.rgb = blended_color;
+	}
+
+	color -= vec4(u_distortion_strength *25 /dist); //black aura
+	
 
     FragColor = color;
 }
