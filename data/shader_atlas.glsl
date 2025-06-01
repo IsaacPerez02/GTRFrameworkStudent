@@ -13,7 +13,98 @@ brdf basic.vs brdf.fs
 ssao quad.vs ssao.fs
 ssao_blur quad.vs ssao_blur.fs
 black_hole quad.vs blackhole.fs
+blackhole3d blackhole3d.vs blackhole3d.fs
+ring blackhole3d.vs ring.fs
 
+\ring.fs
+#version 330 core
+
+in vec3  v_world_position;
+in vec3  v_normal;
+in vec2  v_uv;
+
+uniform vec3  u_camera_position;
+uniform vec3  u_ring_color_inner;
+uniform vec3  u_ring_color_outer;
+uniform float u_ring_thickness;
+uniform float u_ring_falloff;
+
+out vec4 fragColor;
+
+float fresnel_term(vec3 N, vec3 V) {
+    return pow(1.0 - max(dot(N, V), 0.0), 3.0);
+}
+
+void main() {
+    vec3 view_dir = normalize(u_camera_position - v_world_position);
+    vec3 N = normalize(v_normal);
+
+    float f = fresnel_term(N, view_dir);
+
+    float radial = abs(v_uv.y - 0.5) * 2.0;
+    float t = clamp((radial - (1.0 - u_ring_thickness)) / u_ring_thickness, 0.0, 1.0);
+
+    vec3 base_color = mix(u_ring_color_inner, u_ring_color_outer, t);
+    float alpha = exp(-pow((t - 0.5) * 2.0, 2.0) * u_ring_falloff);
+
+    vec3 final_color = base_color * (0.4 + 0.6 * f);
+    fragColor = vec4(final_color, alpha * 0.9);
+
+    if (fragColor.a < 0.01) discard;
+}
+
+
+\blackhole3d.vs
+#version 330 core
+
+in vec3 a_vertex;
+in vec3 a_normal;
+in vec2 a_coord;
+
+uniform mat4 u_model;
+uniform mat4 u_viewprojection;
+
+out vec3 v_world_position;
+out vec3 v_normal;
+out vec4 v_color;
+out vec2 v_uv;
+
+void main() {
+    vec4 world_pos = u_model * vec4(a_vertex, 1.0);
+    v_world_position = world_pos.xyz;
+    v_normal = (u_model * vec4(a_normal, 0.0)).xyz;
+    v_color = vec4(1.0); // not used
+    v_uv = a_coord;
+
+    gl_Position = u_viewprojection * world_pos;
+}
+
+\blackhole3d.fs
+#version 330 core
+
+in vec3 v_world_position;
+in vec3 v_normal;
+
+out vec4 FragColor;
+
+uniform vec3 u_blackhole_world_pos;
+uniform vec3 u_camera_position;
+uniform float u_distortion_strength;
+
+float fresnel(vec3 N, vec3 V) {
+    return pow(1.0 - max(dot(N, V), 0.0), 3.0);
+}
+
+void main() {
+    vec3 view_dir = normalize(u_camera_position - v_world_position);
+    vec3 normal = normalize(v_normal);
+
+    float edge = fresnel(normal, view_dir);
+    vec3 glow_color = mix(vec3(1.0, 0.6, 0.2), vec3(1.0, 0.9, 0.6), edge);
+    glow_color *= edge * u_distortion_strength * 3.0;
+
+    FragColor = vec4(glow_color, 1.0);
+}
 
 
 \blackhole.fs
@@ -22,113 +113,68 @@ black_hole quad.vs blackhole.fs
 in vec2 v_uv;
 out vec4 FragColor;
 
-
-uniform vec3 u_blackhole_world_pos;
+uniform vec3  u_blackhole_world_pos;
 uniform float u_blackhole_radius;
 uniform float u_distortion_strength;
 uniform float u_effect_radius;
 
-uniform sampler2D u_scene_texture; // G-buffer color texture
-uniform sampler2D u_depth_texture; // G-buffer depth texture
+uniform sampler2D u_scene_texture;
+uniform sampler2D u_depth_texture;
 
+uniform vec2  u_inv_screen_size;
+uniform mat4  u_inv_viewprojection;
+uniform mat4  u_viewprojection;
+uniform vec3  u_camera_position;
 
-uniform vec2 u_inv_screen_size; // Inverse of screen size for UV calculations
-uniform mat4 u_inv_viewprojection; // Inverse view-projection matrix for world position calculations
-uniform mat4 u_viewprojection; // View-projection matrix for converting world position to clip space
-
-void main()
-{
-	
-	//Assigment 4 getting data from gbuffer
-	vec2 uv = gl_FragCoord.xy * u_inv_screen_size;
-
-	float depth = texture(u_depth_texture, uv).r;
-	float depth_clip = depth * 2.0 - 1.0;
-
-	vec2 uv_clip = uv * 2.0 - 1.0;
-	vec4 clip_coords = vec4(uv_clip.x, uv_clip.y, depth_clip,1.0);
-
-	vec4 not_norm_world_pos = u_inv_viewprojection * clip_coords;
-
-	vec3 world_pos = not_norm_world_pos.xyz / not_norm_world_pos.w;
-
-    
-	// Convert world pos to clip space
-    vec4 clip = u_viewprojection * vec4(u_blackhole_world_pos, 1.0);
-    vec3 ndc = clip.xyz / clip.w;
-
-    // Convert NDC to screen-space pixel coords
-    vec2 blackhole_screen_pos = (ndc.xy * 0.5 + 0.5) / u_inv_screen_size;
-
-    // Get this pixel's screen-space position
-    vec2 frag_screen_pos = gl_FragCoord.xy;
-
-    // Distance from black hole center
-    float dist = distance(frag_screen_pos, blackhole_screen_pos);
-
-    // If inside black circle radius, return black
-	dist = length(blackhole_screen_pos - frag_screen_pos);
-    if (dist < u_blackhole_radius*3) {
-        FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-        return;
-    }
-	if (dist < u_blackhole_radius*3.1) {
-        FragColor = vec4(0.84, 0.3, 0.88, 1.0);
-        return;
-    }
-	
-	dist = length(world_pos - u_blackhole_world_pos);
-
-	dist = length(blackhole_screen_pos - frag_screen_pos);
-
-
-	//distortion all screen
-	//float factor = (u_blackhole_radius - dist) / u_blackhole_radius;
-    float strength = u_distortion_strength;// * factor;
-
-    // Approximate direction of distortion in screen-space (can be tweaked)
-    vec2 dir = normalize(frag_screen_pos - blackhole_screen_pos);
-	//uv = frag_screen_pos;
-	vec2 right = vec2(dir.y, -dir.x);
-
-    uv += dir * strength/dist*dist * 0.2;
-
-	uv += right * u_distortion_strength * 0.3/dist*dist * 0.2;
-	
-		// Ring blending with scene
-	vec3 ring_color = vec3(0.33, 0.78, 0.9);
-	float ring_inner_radius = u_effect_radius * 100.0 + 10.0;
-	float ring_thickness = u_effect_radius * 20.0;
-	float ring_outer_radius = ring_inner_radius + ring_thickness;
-	float ring_outer_radius_negative = ring_inner_radius - ring_thickness;
-
-
-	vec4 color = texture(u_scene_texture, uv);
-
-	if (dist > ring_inner_radius && dist < ring_outer_radius) {
-		float t = (dist - ring_inner_radius) / ring_thickness;
-		float falloff = 1.0 - t;
-
-		float intensity_boost = 0.9;
-		vec3 blended_color = mix(color.rgb, ring_color * intensity_boost, falloff);
-		color.rgb = blended_color;
-	}
-	if (dist > ring_outer_radius_negative && dist < ring_inner_radius) {
-		float t = (dist - ring_outer_radius_negative) / ring_thickness;
-		float falloff = t;
-
-		float intensity_boost = 0.9;
-		vec3 blended_color = mix(color.rgb, ring_color * intensity_boost, falloff);
-		color.rgb = blended_color;
-	}
-
-	color -= vec4(u_distortion_strength *25 /dist); //black aura
-	
-
-    FragColor = color;
+float calcGravitationalBend(float r_px, float schwarzschild_px) {
+    float C = schwarzschild_px * 1.0;
+    float invR = 1.0 / max(r_px, schwarzschild_px * 0.5);
+    float rawAngle = C * invR;
+    return clamp(rawAngle, -1.57, 1.57);
 }
 
+void main() {
+    vec2 uv = gl_FragCoord.xy * u_inv_screen_size;
 
+    // 1) Reconstrucción de posición mundial (si la necesitas para debug)
+    float depth = texture(u_depth_texture, uv).r;
+    float depth_clip = depth * 2.0 - 1.0;
+    vec2 uv_clip = uv * 2.0 - 1.0;
+    vec4 clip_coords = vec4(uv_clip, depth_clip, 1.0);
+    vec4 view_pos = u_inv_viewprojection * clip_coords;
+    vec3 world_pos = view_pos.xyz / view_pos.w;
+
+    // 2) Posición del agujero en pantalla
+    vec4 bh_clip = u_viewprojection * vec4(u_blackhole_world_pos, 1.0);
+    vec2 bh_ndc = bh_clip.xy / bh_clip.w;
+    vec2 bh_uv = bh_ndc * 0.5 + 0.5;
+    vec2 bh_px = bh_uv / u_inv_screen_size;
+    vec2 frag_px = gl_FragCoord.xy;
+    float dist_px = length(frag_px - bh_px);
+
+    // 3) Gravitational bending (igual que antes)
+    float schwarzschild_px = u_blackhole_radius * 3.0;
+    vec2 dir_px = normalize(frag_px - bh_px);
+    float theta = atan(dir_px.y, dir_px.x);
+    float bend_angle = calcGravitationalBend(dist_px, schwarzschild_px);
+    float new_theta = theta + bend_angle;
+    vec2 bent_px = bh_px + dist_px * vec2(cos(new_theta), sin(new_theta));
+    vec2 bent_uv = bent_px * u_inv_screen_size;
+
+    // 4) Extra lensing
+    vec2 right_n = vec2(dir_px.y, -dir_px.x);
+    float lens_radius_px = schwarzschild_px + u_effect_radius * 60.0;
+    float falloff = 1.0 - smoothstep(schwarzschild_px, lens_radius_px, dist_px);
+    vec2 scene_uv = bent_uv;
+    scene_uv += dir_px  * (u_distortion_strength * 0.15 * falloff);
+    scene_uv += right_n * (u_distortion_strength * 0.25 * falloff);
+
+    // 5) Muestra el fondo distorsionado
+    vec4 baseColor = texture(u_scene_texture, scene_uv);
+
+    // 6) Ya no pintamos anillos 2D aquí. Solo devolvemos baseColor:
+    FragColor = baseColor;
+}
 
 
 \PBR_functions

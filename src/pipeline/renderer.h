@@ -86,6 +86,11 @@ namespace SCN {
 
 		void renderSSAO(Camera* camera); //Assignment 6
 
+		void renderBlackHole3D(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material);
+
+		void applyBlackholePostProcessing();
+		void createRingMesh();
+
 		void renderPlain(const Camera& lightCam,
 			const Matrix44& model,
 			GFX::Mesh* mesh,

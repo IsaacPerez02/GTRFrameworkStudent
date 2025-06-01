@@ -39,10 +39,15 @@ std::vector<SCN::LightEntity*> lights;
 std::vector<sDrawCommand> lightSpheres; // Assignment 4
 
 
+
+
 float black_hole_radius = 5.0f; // Radius of the black hole sphere
 float black_hole_strength = 0.2f; // Strength of the black hole effect
 vec3 black_hole_pos = vec3(1.0f, 1.0f, 1.0f); // Position of the black hole
 float black_hole_effect_radius = 1.0f; // Radius of the black hole effect area
+GFX::Shader* ringShader = nullptr;
+float u_ring_thickness = 0.1f;
+
 
 // If true, use multipass rendering (e.g., per-light passes)
 bool use_multipass = false;
@@ -57,8 +62,8 @@ float alpha_cutoff = 0;
 using namespace SCN;
 
 //some globals
-bool cull_front_faces = true;  
-float shadow_bias = 0.001f; 
+bool cull_front_faces = true;
+float shadow_bias = 0.001f;
 static const int MAX_SHADOW_CASTERS = 4;
 
 GFX::Mesh sphere;
@@ -83,6 +88,7 @@ GFX::FBO ssao_FBO;
 // SSAO shader
 GFX::Shader* ssao_shader = nullptr;
 
+GFX::Mesh* ringMesh = nullptr;
 
 
 Camera lightCam; // Assignment 3
@@ -128,8 +134,17 @@ Renderer::Renderer(const char* shader_atlas_filename)
 		exit(1);
 	}
 
+	ringShader = GFX::Shader::Get("ring");
+	if (!ringShader) {
+		std::cerr << "Error: no se pudo cargar el shader ring\n";
+		exit(1);
+	}
+
 	sphere.createSphere(1.0f);
 	sphere.uploadToVRAM();
+
+	createRingMesh();
+
 
 	// Shadow map FBO setup (only depth, 1024x1024)
 	shadow_FBOs.resize(MAX_SHADOW_CASTERS);
@@ -141,12 +156,12 @@ Renderer::Renderer(const char* shader_atlas_filename)
 		2, // Create two texture to render to
 		GL_RGBA, // Each texture has an R G B and A channels
 		GL_HALF_FLOAT, // Uses 8 bits per channel
-		true); 
+		true);
 	lighting_FBO.create(1024, 768,
 		1, // Create one texture to render to
 		GL_RGBA, // Each texture has an R G B and A channels
 		GL_FLOAT, // Uses 8 bits per channel, we have to try more
-		true); 
+		true);
 	// SSAO FBO (solo un canal, puedes hacerlo a mitad de resolución si quieres)
 	ssao_FBO.create(
 		gbuffer_FBO.width,                   // ancho del FBO
@@ -167,6 +182,8 @@ Renderer::Renderer(const char* shader_atlas_filename)
 
 }
 
+
+
 void Renderer::setupScene()
 {
 	if (scene->skybox_filename.size())
@@ -182,7 +199,7 @@ void Renderer::orderNodes(Camera* cam) {
 
 	// Separate draw commands based on their material alpha mode
 	for (sDrawCommand command : draw_command_list) {
-		
+
 		if (command.material->alpha_mode == SCN::eAlphaMode::BLEND) {
 
 			// Transparent objects (need to be drawn back-to-front)
@@ -302,7 +319,7 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 
 	rendertoGFBO(); // Assignment 4, takes color and normal from scene to texture
 
-	
+
 	if (use_ssao) {
 		renderSSAO(camera);
 		ssao_FBO.color_textures[0]->toViewport();
@@ -337,11 +354,11 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 		}
 	}
 
-	
+
 	if (use_deferred_rendering) {
 		// Same for quad
 		Renderer::renderQuadWithGFBO(opaqueNodes[0].model, opaqueNodes[0].mesh, opaqueNodes[0].material, true); //True for first pass(directional and ambient only)
-		
+
 
 
 
@@ -352,25 +369,65 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 		}
 
 		//BlackHole
-		vec3 blackhole_pos = vec3(1.0f, 1.0f, 1.0f); 
+		vec3 blackhole_pos = vec3(1.0f, 1.0f, 1.0f);
 
-		sDrawCommand blackhole_com;
-		GFX::Mesh blackhole = GFX::Mesh();
-		blackhole.GFX::Mesh::createSphere(5, 10, 10);
-		blackhole_com.mesh = &blackhole;
+		// Creamos la esfera solo una vez
+		static GFX::Mesh blackhole_sphere;
+		static bool initialized = false;
+		if (!initialized) {
+			blackhole_sphere.createSphere(1.0f); // unidad
+			blackhole_sphere.uploadToVRAM();
+			initialized = true;
+		}
 
-		// Position the sphere
-		blackhole_com.model.translate(blackhole_pos.x,blackhole_pos.y,blackhole_pos.z);
+		// Modelo escalado y posicionado
+		Matrix44 blackhole_model;
+		blackhole_model.setTranslation(black_hole_pos.x, black_hole_pos.y, black_hole_pos.z);
+		blackhole_model.scale(black_hole_radius, black_hole_radius, black_hole_radius);
+
+		// Llamamos a la nueva función
+		final_render_FBO.color_textures[0]->toViewport(); // muestra la escena
+
+		applyBlackholePostProcessing();
+
+		renderBlackHole3D(blackhole_model, &blackhole_sphere, nullptr); // dibuja encima
+
+		if (ringShader && ringMesh) {
+			glEnable(GL_DEPTH_TEST);
+			glEnable(GL_BLEND);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+			float radioFotones = black_hole_radius * 1.0f;
+			float radioMedioBase = 1.1f;
+			float escalaXZ = radioFotones * radioMedioBase;
+			float escalaY = u_ring_thickness * black_hole_radius;
+
+			Matrix44 ringModel;
+			ringModel.setTranslation(black_hole_pos.x, black_hole_pos.y, black_hole_pos.z);
+			ringModel.scale(escalaXZ, escalaY, escalaXZ);
+
+			ringShader->enable();
 
 
-		Material mat = Material();
-		mat.color = vec4(1.0,1.0,1.0, 1.0);
-		blackhole_com.material = &mat;
+			ringShader->setUniform("u_model", ringModel);
 
-		
-		Renderer::blackHoleRender(blackhole_com.model, blackhole_com.mesh, blackhole_com.material, blackhole_com.model.getTranslation());
+			ringShader->setUniform("u_viewprojection", Camera::current->viewprojection_matrix);
+			ringShader->setUniform("u_camera_position", Camera::current->eye);
+			ringShader->setUniform("u_ring_color_inner", vec3(1.0f, 0.8f, 0.3f));
+			ringShader->setUniform("u_ring_color_outer", vec3(1.0f, 0.3f, 0.1f));
+			ringShader->setUniform("u_ring_thickness", u_ring_thickness);
+			ringShader->setUniform("u_ring_falloff", 4.0f);
+
+			ringMesh->render(GL_TRIANGLES);
+			ringShader->disable();
+
+			glDisable(GL_BLEND);
+		}
+
+		//applyBlackholePostProcessing();
+
 	}
-			
+
 }
 
 
@@ -488,7 +545,7 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, GFX::Mesh* mesh, SCN
 	// Collect light data
 	for (int i = 0; i < numLights; i++) {
 
-		
+
 		SCN::LightEntity* light = lights[i];
 
 		// Process each light based on type (point, directional, spotlight)
@@ -539,7 +596,7 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, GFX::Mesh* mesh, SCN
 			shader->setUniform(
 				shadowNames[i],
 				shadow_FBOs[i].depth_texture,
-			    2 + i
+				2 + i
 			);
 		}
 
@@ -583,7 +640,7 @@ void Renderer::renderMeshWithMaterial(const Matrix44 model, GFX::Mesh* mesh, SCN
 				// no hay sombra en esta pasada
 				shader->setUniform("u_numShadowCasters", 0);
 			}
-			
+
 			// Enable/disable blending depending on the light and apply or no ambient light
 			if (i == 0) {
 				glDisable(GL_BLEND);
@@ -657,7 +714,7 @@ void Renderer::renderQuadWithGFBO(const Matrix44 model, GFX::Mesh* mesh, SCN::Ma
 	// Activate the shader
 	shader->enable();
 
-	
+
 	// Define shadow map uniforms
 	static const char* shadowNames[MAX_SHADOW_CASTERS] = {
 			"u_shadow_maps[0]",
@@ -792,7 +849,7 @@ void Renderer::renderQuadWithGFBO(const Matrix44 model, GFX::Mesh* mesh, SCN::Ma
 		quad->render(GL_TRIANGLES);
 		glEnable(GL_DEPTH_TEST);
 	}
-	
+
 	//disable shader
 	shader->disable();
 
@@ -817,11 +874,12 @@ void Renderer::showUI()
 	ImGui::SliderFloat("Black Hole Radius", &black_hole_radius, 0.1f, 10.0f, "%.1f");
 	ImGui::SliderFloat("Black Hole Effect Radius", &black_hole_effect_radius, 0.1f, 5.0f, "%.1f");
 	ImGui::SliderFloat("Black Hole Strength", &black_hole_strength, 0.0f, 1.0f, "%.2f");
+	ImGui::SliderFloat("Ring Thickness", &u_ring_thickness, 0.01f, 2.0f, "%.2f");
 	ImGui::InputFloat3("Black Hole Position", &black_hole_pos.x, "%.2f");
 	ImGui::Separator();
 	ImGui::Checkbox("Ditering", &ditering);
 	ImGui::Checkbox("Compress Normals", &compress_normals);
-	
+
 	ImGui::Checkbox("BRDF", &brdf);
 
 	// Slider to adjust the shadow bias
@@ -940,7 +998,7 @@ void Renderer::rendertoGFBO() {
 
 	for (sDrawCommand& cmd : opaqueNodes)
 		renderMeshwithTexture(cmd.model, cmd.mesh, cmd.material);
-	
+
 
 	//for (sDrawCommand& cmd : transparentNodes)
 		//renderMeshwithTexture(cmd.model, cmd.mesh, cmd.material);
@@ -960,14 +1018,14 @@ void Renderer::rendertoLightFBO() {
 	Camera* camera = Camera::current;
 	glEnable(GL_DEPTH_TEST);
 	//chose a shader
-	
+
 	if (!shader)
 		return;
 
 	static GFX::Mesh sphereforrender;
 	static bool created = false;
 	static GFX::Mesh coneforrender;
-	
+
 	if (!created) {
 		sphereforrender.createSphere(1.0f, 20, 20); // unit sphere
 		created = true;
@@ -995,7 +1053,7 @@ void Renderer::rendertoLightFBO() {
 	};
 	shader->enable();
 
-	
+
 	for (int i = 0; i < lights.size(); i++)
 	{
 		if (!lights[i]->visible)
@@ -1013,14 +1071,14 @@ void Renderer::rendertoLightFBO() {
 		if (lights[i]->light_type == SCN::eLightType::SPOT) {
 			continue;
 			float* alpha_min = new float;
-			*alpha_min =	DEG2RAD * lights[i]->cone_info.x;
+			*alpha_min = DEG2RAD * lights[i]->cone_info.x;
 			float* alpha_max = new float;
 			*alpha_max = DEG2RAD * lights[i]->cone_info.y;
 
 			shader->setUniform2("u_light_cone_info", *alpha_min, *alpha_max);
 		}
 		//uniforms
-		
+
 		// Upload camera uniforms
 		shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
 		shader->setUniform("u_camera_position", camera->eye);
@@ -1032,7 +1090,7 @@ void Renderer::rendertoLightFBO() {
 		shader->setUniform3("u_light_color", lights[i]->color);
 		shader->setUniform1("u_light_intensity", lights[i]->intensity);
 
-		
+
 		shader->setUniform1("u_light_type", 0);
 		shader->setUniform3("u_light_direction", lights[i]->root.getGlobalMatrix().frontVector().normalize());
 		shader->setUniform(
@@ -1059,7 +1117,7 @@ void Renderer::rendertoLightFBO() {
 
 		if (render_wireframe) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 		sphereforrender.render(GL_TRIANGLES);
-		
+
 	}
 	shader->disable();
 	lighting_FBO.unbind();
@@ -1069,14 +1127,14 @@ void Renderer::rendertoLightFBO() {
 	glDepthMask(GL_TRUE);
 	glDepthFunc(GL_LESS);
 
-	
+
 	glFrontFace(GL_CCW);
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	
+
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDisable(GL_BLEND);
 	glEnable(GL_DEPTH_TEST);
-	
+
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
 
@@ -1285,7 +1343,7 @@ void Renderer::createSpheresOfLights(std::vector<SCN::LightEntity*> lights) {
 			draw_com.model = lights[i]->root.global_model;
 			draw_com.mesh = sphere;
 			Material* mat = new Material();
-			mat->color = vec4(lights[i]->color,1.0);
+			mat->color = vec4(lights[i]->color, 1.0);
 			draw_com.material = mat;
 			draw_command_list.push_back(draw_com);
 		}
@@ -1299,8 +1357,8 @@ void Renderer::blackHoleRender(const Matrix44 model, GFX::Mesh* mesh, SCN::Mater
 	if (!shader || !quad)
 		return;
 
-	
-	
+
+
 	shader->enable();
 
 
@@ -1311,7 +1369,7 @@ void Renderer::blackHoleRender(const Matrix44 model, GFX::Mesh* mesh, SCN::Mater
 
 	shader->setUniform3("u_blackhole_world_pos", black_hole_pos);
 
-	
+
 	Camera* camera = Camera::current;
 	Matrix44 inv_viewproj = camera->viewprojection_matrix;
 	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
@@ -1323,14 +1381,165 @@ void Renderer::blackHoleRender(const Matrix44 model, GFX::Mesh* mesh, SCN::Mater
 
 
 	shader->setUniform("u_effect_radius", black_hole_effect_radius);
-	shader->setUniform("u_blackhole_radius", OscillateValue(black_hole_radius, 0.2f, 100.0f));
-	shader->setUniform("u_distortion_strength", OscillateValue(black_hole_strength, 0.05f, 100.0f));
+	shader->setUniform("u_blackhole_radius", black_hole_radius);
+	shader->setUniform("u_distortion_strength", black_hole_strength);
+
+	shader->setUniform("u_camera_position", camera->eye);
+
+
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	//mesh->render(GL_TRIANGLES); efecto guapisimo
 	quad->render(GL_TRIANGLES);
 	shader->disable();
 }
 
+void Renderer::renderBlackHole3D(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material) {
+	GFX::Shader* shader = GFX::Shader::Get("blackhole3d");
+	if (!shader || !mesh) return;
+
+	shader->enable();
+
+	Camera* camera = Camera::current;
+
+	shader->setUniform("u_model", model);
+	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+
+	shader->setUniform("u_blackhole_world_pos", black_hole_pos);
+	shader->setUniform("u_camera_position", camera->eye);
+	shader->setUniform("u_blackhole_radius", black_hole_radius);
+	shader->setUniform("u_effect_radius", black_hole_effect_radius);
+	shader->setUniform("u_distortion_strength", black_hole_strength);
+
+	shader->setTexture("u_scene_texture", final_render_FBO.color_textures[0], 0);
+	shader->setTexture("u_depth_texture", gbuffer_FBO.depth_texture, 1);
+
+	shader->setUniform("u_inv_screen_size", Vector2f(1.0f / final_render_FBO.width, 1.0f / final_render_FBO.height));
+	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+
+
+
+	Matrix44 inv_vp = camera->viewprojection_matrix;
+	inv_vp.inverse();
+	shader->setUniform("u_inv_viewprojection", inv_vp);
+
+
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+
+	glDisable(GL_BLEND);
+
+	mesh->render(GL_TRIANGLES);
+
+	shader->disable();
+}
+
+// Renderer.cpp (método adicional claramente separado para post-procesado)
+
+void Renderer::applyBlackholePostProcessing() {
+
+	GFX::Shader* shader = GFX::Shader::Get("black_hole");
+	GFX::Mesh* quad = GFX::Mesh::getQuad();
+
+	if (!shader || !quad)
+		return;
+
+	shader->enable();
+
+	shader->setTexture("u_scene_texture", final_render_FBO.color_textures[0], 0);
+	shader->setTexture("u_depth_texture", gbuffer_FBO.depth_texture, 1);
+
+	shader->setUniform3("u_blackhole_world_pos", black_hole_pos);
+	shader->setUniform("u_blackhole_radius", black_hole_radius);
+	shader->setUniform("u_effect_radius", black_hole_effect_radius);
+	shader->setUniform("u_distortion_strength", black_hole_strength);
+
+	Camera* camera = Camera::current;
+	Matrix44 inv_viewproj = camera->viewprojection_matrix;
+	inv_viewproj.inverse();
+
+	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+	shader->setUniform("u_inv_viewprojection", inv_viewproj);
+	shader->setUniform("u_inv_screen_size", Vector2f(1.0f / final_render_FBO.width, 1.0f / final_render_FBO.height));
+	shader->setUniform("u_camera_position", camera->eye);
+
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+
+	quad->render(GL_TRIANGLES);
+
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+
+	shader->disable();
+}
+
+void Renderer::createRingMesh()
+{
+	if (ringMesh) return;
+
+	ringMesh = new GFX::Mesh();
+
+	const int   SEGMENTS_U = 64;
+	const int   SEGMENTS_V = 16;
+	const float R_MAJOR = 1.0f;
+	const float R_MINOR = 0.2f;
+
+	ringMesh->vertices.reserve((SEGMENTS_U + 1) * (SEGMENTS_V + 1));
+	ringMesh->normals.reserve((SEGMENTS_U + 1) * (SEGMENTS_V + 1));
+	ringMesh->uvs.reserve((SEGMENTS_U + 1) * (SEGMENTS_V + 1));
+	ringMesh->m_indices.reserve(SEGMENTS_U * SEGMENTS_V * 6);
+
+	for (int i = 0; i <= SEGMENTS_U; ++i) {
+		float u = float(i) / float(SEGMENTS_U);
+		float theta = u * 2.0f * 3.14159265f;
+		float cosTheta = cosf(theta);
+		float sinTheta = sinf(theta);
+
+		for (int j = 0; j <= SEGMENTS_V; ++j) {
+			float v = float(j) / float(SEGMENTS_V);
+			float phi = v * 2.0f * 3.14159265f;
+			float cosPhi = cosf(phi);
+			float sinPhi = sinf(phi);
+
+
+			float x = (R_MAJOR + R_MINOR * cosPhi) * cosTheta;
+			float y = (R_MINOR * sinPhi);
+			float z = (R_MAJOR + R_MINOR * cosPhi) * sinTheta;
+			ringMesh->vertices.push_back(Vector3f(x, y, z));
+
+			Vector3f n(cosPhi * cosTheta,
+				sinPhi,
+				cosPhi * sinTheta);
+			ringMesh->normals.push_back(n.normalize());
+
+			ringMesh->uvs.push_back(Vector2f(u, v));
+		}
+	}
+
+
+	for (int i = 0; i < SEGMENTS_U; ++i) {
+		for (int j = 0; j < SEGMENTS_V; ++j) {
+			int i0 = i * (SEGMENTS_V + 1) + j;
+			int i1 = (i + 1) * (SEGMENTS_V + 1) + j;
+			int i2 = i * (SEGMENTS_V + 1) + (j + 1);
+			int i3 = (i + 1) * (SEGMENTS_V + 1) + (j + 1);
+
+			ringMesh->m_indices.push_back(i0);
+			ringMesh->m_indices.push_back(i2);
+			ringMesh->m_indices.push_back(i1);
+
+			ringMesh->m_indices.push_back(i1);
+			ringMesh->m_indices.push_back(i2);
+			ringMesh->m_indices.push_back(i3);
+		}
+	}
+
+	ringMesh->interleaveBuffers();
+	ringMesh->uploadToVRAM();
+
+	ringMesh->updateBoundingBox();
+	ringMesh->radius = R_MAJOR + R_MINOR;
+}
 
 
 #else
