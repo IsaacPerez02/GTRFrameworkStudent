@@ -47,6 +47,7 @@ vec3 black_hole_pos = vec3(1.0f, 1.0f, 1.0f); // Position of the black hole
 float black_hole_effect_radius = 1.0f; // Radius of the black hole effect area
 GFX::Shader* ringShader = nullptr;
 float u_ring_thickness = 0.1f;
+bool black_hole_2d_or_3d = false;
 
 
 // If true, use multipass rendering (e.g., per-light passes)
@@ -364,64 +365,88 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 
 		Renderer::rendertoLightFBO(); //True for first pass(directional and ambient only)
 
+		/*
 		for (sDrawCommand command : transparentNodes) {
 			Renderer::renderMeshWithMaterial(command.model, command.mesh, command.material);
 		}
+		*/
+		if (black_hole_2d_or_3d) {
+			//BlackHole
+			vec3 blackhole_pos = vec3(1.0f, 1.0f, 1.0f);
 
-		//BlackHole
-		vec3 blackhole_pos = vec3(1.0f, 1.0f, 1.0f);
+			// Creamos la esfera solo una vez
+			static GFX::Mesh blackhole_sphere;
+			static bool initialized = false;
+			if (!initialized) {
+				blackhole_sphere.createSphere(1.0f); // unidad
+				blackhole_sphere.uploadToVRAM();
+				initialized = true;
+			}
 
-		// Creamos la esfera solo una vez
-		static GFX::Mesh blackhole_sphere;
-		static bool initialized = false;
-		if (!initialized) {
-			blackhole_sphere.createSphere(1.0f); // unidad
-			blackhole_sphere.uploadToVRAM();
-			initialized = true;
+			// Modelo escalado y posicionado
+			Matrix44 blackhole_model;
+			blackhole_model.setTranslation(black_hole_pos.x, black_hole_pos.y, black_hole_pos.z);
+			blackhole_model.scale(black_hole_radius, black_hole_radius, black_hole_radius);
+
+			// Llamamos a la nueva función
+			final_render_FBO.color_textures[0]->toViewport(); // muestra la escena
+
+			applyBlackholePostProcessing();
+
+			renderBlackHole3D(blackhole_model, &blackhole_sphere, nullptr); // dibuja encima
+
+			if (ringShader && ringMesh) {
+				glEnable(GL_DEPTH_TEST);
+				glEnable(GL_BLEND);
+				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+				float radioFotones = black_hole_radius * 1.0f;
+				float radioMedioBase = 1.1f;
+				float escalaXZ = radioFotones * radioMedioBase;
+				float escalaY = u_ring_thickness * black_hole_radius;
+
+				Matrix44 ringModel;
+				ringModel.setTranslation(black_hole_pos.x, black_hole_pos.y, black_hole_pos.z);
+				ringModel.scale(escalaXZ, escalaY, escalaXZ);
+
+				ringShader->enable();
+
+
+				ringShader->setUniform("u_model", ringModel);
+
+				ringShader->setUniform("u_viewprojection", Camera::current->viewprojection_matrix);
+				ringShader->setUniform("u_camera_position", Camera::current->eye);
+				ringShader->setUniform("u_ring_color_inner", vec3(1.0f, 0.8f, 0.3f));
+				ringShader->setUniform("u_ring_color_outer", vec3(1.0f, 0.3f, 0.1f));
+				ringShader->setUniform("u_ring_thickness", u_ring_thickness);
+				ringShader->setUniform("u_ring_falloff", 4.0f);
+
+				ringMesh->render(GL_TRIANGLES);
+				ringShader->disable();
+
+				glDisable(GL_BLEND);
+			}
+			
 		}
+		else {
+			//BlackHole
+			vec3 blackhole_pos = vec3(1.0f, 1.0f, 1.0f);
 
-		// Modelo escalado y posicionado
-		Matrix44 blackhole_model;
-		blackhole_model.setTranslation(black_hole_pos.x, black_hole_pos.y, black_hole_pos.z);
-		blackhole_model.scale(black_hole_radius, black_hole_radius, black_hole_radius);
+			sDrawCommand blackhole_com;
+			GFX::Mesh blackhole = GFX::Mesh(); //dont use it, it is more for understanding the parameters better
+			blackhole.GFX::Mesh::createSphere(5, 10, 10);
+			blackhole_com.mesh = &blackhole;
 
-		// Llamamos a la nueva función
-		final_render_FBO.color_textures[0]->toViewport(); // muestra la escena
-
-		applyBlackholePostProcessing();
-
-		renderBlackHole3D(blackhole_model, &blackhole_sphere, nullptr); // dibuja encima
-
-		if (ringShader && ringMesh) {
-			glEnable(GL_DEPTH_TEST);
-			glEnable(GL_BLEND);
-			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-			float radioFotones = black_hole_radius * 1.0f;
-			float radioMedioBase = 1.1f;
-			float escalaXZ = radioFotones * radioMedioBase;
-			float escalaY = u_ring_thickness * black_hole_radius;
-
-			Matrix44 ringModel;
-			ringModel.setTranslation(black_hole_pos.x, black_hole_pos.y, black_hole_pos.z);
-			ringModel.scale(escalaXZ, escalaY, escalaXZ);
-
-			ringShader->enable();
+			// Position the sphere
+			blackhole_com.model.translate(blackhole_pos.x, blackhole_pos.y, blackhole_pos.z);
 
 
-			ringShader->setUniform("u_model", ringModel);
+			Material mat = Material();
+			mat.color = vec4(1.0, 1.0, 1.0, 1.0);
+			blackhole_com.material = &mat;
 
-			ringShader->setUniform("u_viewprojection", Camera::current->viewprojection_matrix);
-			ringShader->setUniform("u_camera_position", Camera::current->eye);
-			ringShader->setUniform("u_ring_color_inner", vec3(1.0f, 0.8f, 0.3f));
-			ringShader->setUniform("u_ring_color_outer", vec3(1.0f, 0.3f, 0.1f));
-			ringShader->setUniform("u_ring_thickness", u_ring_thickness);
-			ringShader->setUniform("u_ring_falloff", 4.0f);
 
-			ringMesh->render(GL_TRIANGLES);
-			ringShader->disable();
-
-			glDisable(GL_BLEND);
+			Renderer::blackHoleRender2D(blackhole_com.model, blackhole_com.mesh, blackhole_com.material, blackhole_com.model.getTranslation());
 		}
 
 		//applyBlackholePostProcessing();
@@ -871,6 +896,7 @@ void Renderer::showUI()
 
 	ImGui::Checkbox("Deferred Rendering", &use_deferred_rendering);
 	ImGui::Separator();
+	ImGui::Checkbox("BlackHole 2d or 3d", &black_hole_2d_or_3d);
 	ImGui::SliderFloat("Black Hole Radius", &black_hole_radius, 0.1f, 10.0f, "%.1f");
 	ImGui::SliderFloat("Black Hole Effect Radius", &black_hole_effect_radius, 0.1f, 5.0f, "%.1f");
 	ImGui::SliderFloat("Black Hole Strength", &black_hole_strength, 0.0f, 1.0f, "%.2f");
@@ -1349,15 +1375,48 @@ void Renderer::createSpheresOfLights(std::vector<SCN::LightEntity*> lights) {
 		}
 	}
 }
+void Renderer::blackHoleRender2D(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, vec3 pos_hole) {
+	GFX::Mesh* quad = GFX::Mesh::getQuad(); // screen-space quad
 
+	GFX::Shader* shader = GFX::Shader::Get("black_hole2D");
+	if (!shader || !quad)
+		return;
+
+	shader->enable();
+
+
+	shader->setTexture("u_scene_texture", final_render_FBO.color_textures[0], 0);
+	shader->setTexture("u_depth_texture", gbuffer_FBO.depth_texture, 1); // needed to reconstruct world pos
+
+
+
+	shader->setUniform3("u_blackhole_world_pos", black_hole_pos);
+
+
+	Camera* camera = Camera::current;
+	Matrix44 inv_viewproj = camera->viewprojection_matrix;
+	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+	inv_viewproj.inverse(); // make sure it's correct
+	shader->setUniform("u_inv_viewprojection", inv_viewproj);
+
+
+	shader->setUniform("u_inv_screen_size", Vector2f(1.0f / final_render_FBO.width, 1.0f / final_render_FBO.height));
+
+
+	shader->setUniform("u_effect_radius", black_hole_effect_radius);
+	shader->setUniform("u_blackhole_radius", OscillateValue(black_hole_radius, 0.2f, 100.0f));
+	shader->setUniform("u_distortion_strength", OscillateValue(black_hole_strength, 0.05f, 100.0f));
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	//mesh->render(GL_TRIANGLES); efecto guapisimo
+	quad->render(GL_TRIANGLES);
+	shader->disable();
+}
 void Renderer::blackHoleRender(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, vec3 pos_hole) {
 	GFX::Mesh* quad = GFX::Mesh::getQuad(); // screen-space quad
 
 	GFX::Shader* shader = GFX::Shader::Get("black_hole");
 	if (!shader || !quad)
 		return;
-
-
 
 	shader->enable();
 

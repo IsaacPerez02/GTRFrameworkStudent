@@ -72,6 +72,8 @@ namespace SCN {
 
 		void blackHoleRender(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, vec3 pos_hole);
 
+		void blackHoleRender2D(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, vec3 pos_hole);
+
 		void showShininessSliders(SCN::Node* node);//Assignment 2
 
 		Camera configureLightCamera(int index); //Assignment 3

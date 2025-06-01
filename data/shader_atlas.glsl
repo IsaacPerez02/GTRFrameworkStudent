@@ -14,7 +14,127 @@ ssao quad.vs ssao.fs
 ssao_blur quad.vs ssao_blur.fs
 black_hole quad.vs blackhole.fs
 blackhole3d blackhole3d.vs blackhole3d.fs
+black_hole2D quad.vs blackhole2D.fs
 ring blackhole3d.vs ring.fs
+
+
+\blackhole2D.fs
+#version 330 core
+
+in vec2 v_uv;
+out vec4 FragColor;
+
+
+uniform vec3 u_blackhole_world_pos;
+uniform float u_blackhole_radius;
+uniform float u_distortion_strength;
+uniform float u_effect_radius;
+
+uniform sampler2D u_scene_texture; // G-buffer color texture
+uniform sampler2D u_depth_texture; // G-buffer depth texture
+
+
+uniform vec2 u_inv_screen_size; // Inverse of screen size for UV calculations
+uniform mat4 u_inv_viewprojection; // Inverse view-projection matrix for world position calculations
+uniform mat4 u_viewprojection; // View-projection matrix for converting world position to clip space
+
+void main()
+{
+	
+	//Assigment 4 getting data from gbuffer
+	vec2 uv = gl_FragCoord.xy * u_inv_screen_size;
+
+	float depth = texture(u_depth_texture, uv).r;
+	float depth_clip = depth * 2.0 - 1.0;
+
+	vec2 uv_clip = uv * 2.0 - 1.0;
+	vec4 clip_coords = vec4(uv_clip.x, uv_clip.y, depth_clip,1.0);
+
+	vec4 not_norm_world_pos = u_inv_viewprojection * clip_coords;
+
+	vec3 world_pos = not_norm_world_pos.xyz / not_norm_world_pos.w;
+
+    
+	// Convert world pos to clip space
+    vec4 clip = u_viewprojection * vec4(u_blackhole_world_pos, 1.0);
+    vec3 ndc = clip.xyz / clip.w;
+
+    // Convert NDC to screen-space pixel coords
+    vec2 blackhole_screen_pos = (ndc.xy * 0.5 + 0.5) / u_inv_screen_size;
+
+    // Get this pixel's screen-space position
+    vec2 frag_screen_pos = gl_FragCoord.xy;
+
+    // Distance from black hole center
+    float dist = distance(frag_screen_pos, blackhole_screen_pos);
+
+    // If inside black circle radius, return black
+	dist = length(blackhole_screen_pos - frag_screen_pos);
+    if (dist < u_blackhole_radius*3) {
+        FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+	if (dist < u_blackhole_radius*3.1) {
+        FragColor = vec4(1.0f, 0.8f, 0.3f,1.0);
+        return;
+    }
+	
+	dist = length(world_pos - u_blackhole_world_pos);
+
+	dist = length(blackhole_screen_pos - frag_screen_pos);
+
+
+	//distortion all screen
+	//float factor = (u_blackhole_radius - dist) / u_blackhole_radius;
+    float strength = u_distortion_strength;// * factor;
+
+    // Approximate direction of distortion in screen-space (can be tweaked)
+    vec2 dir = normalize(frag_screen_pos - blackhole_screen_pos);
+	//uv = frag_screen_pos;
+	vec2 right = vec2(dir.y, -dir.x);
+
+    uv += dir * strength/dist*dist * 0.2;
+
+	uv += right * u_distortion_strength * 0.3/dist*dist * 0.2;
+	
+	//2D ring
+	
+		// Ring blending with scene
+	vec3 ring_color = vec3(1.0f, 0.8f, 0.3f);
+	float ring_inner_radius = u_effect_radius * 100.0 + 10.0;
+	float ring_thickness = u_effect_radius * 20.0;
+	float ring_outer_radius = ring_inner_radius + ring_thickness;
+	float ring_outer_radius_negative = ring_inner_radius - ring_thickness;
+
+
+	vec4 color = texture(u_scene_texture, uv);
+
+	if (dist > ring_inner_radius && dist < ring_outer_radius) {
+		float t = (dist - ring_inner_radius) / ring_thickness;
+		float falloff = 1.0 - t;
+
+		float intensity_boost = 0.9;
+		vec3 blended_color = mix(color.rgb, ring_color * intensity_boost, falloff);
+		color.rgb = blended_color;
+	}
+	if (dist > ring_outer_radius_negative && dist < ring_inner_radius) {
+		float t = (dist - ring_outer_radius_negative) / ring_thickness;
+		float falloff = t;
+
+		float intensity_boost = 0.9;
+		vec3 blended_color = mix(color.rgb, ring_color * intensity_boost, falloff);
+		color.rgb = blended_color;
+	}
+	
+	
+
+
+	dist = length(blackhole_screen_pos - frag_screen_pos);
+	color -= vec4(u_distortion_strength *25 /dist); //black aura
+	
+
+    FragColor = color;
+}
 
 \ring.fs
 #version 330 core
