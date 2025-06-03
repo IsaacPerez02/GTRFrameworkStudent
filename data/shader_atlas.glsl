@@ -180,63 +180,31 @@ uniform float u_time;
 
 out vec4 fragColor;
 
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453);
-}
-
-float fresnel_term(vec3 N, vec3 V) {
-    return pow(1.0 - max(dot(N, V), 0.0), 5.0);  // Más fuerte (potencia 5)
-}
-
-float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-
-    vec2 u = f*f*(3.0-2.0*f);
-
-    return mix(a, b, u.x) + (c - a)*u.y*(1.0 - u.x) + (d - b)*u.x*u.y;
-}
-
 void main() {
-    vec3 view_dir = normalize(u_camera_position - v_world_position);
-    vec3 N = normalize(v_normal);
-
-    float f = fresnel_term(N, view_dir);
-
     vec2 uv_centered = v_uv - vec2(0.5);
     float radial = length(uv_centered);
 
-    float n = noise(uv_centered * 30.0 + u_time * 3.0);
-    float dynamic_offset = 0.03 * n + 0.03 * u_distortion_strength;
+    // Simple mezcla radial
+    float t = smoothstep(u_ring_radius_inner, u_ring_radius_outer, radial);
 
-    float r_inner = u_ring_radius_inner - dynamic_offset;
-    float r_outer = u_ring_radius_outer + dynamic_offset;
-
-    float t = smoothstep(r_inner, r_outer, radial);
-
+    // Ondas visuales básicas
     float wave1 = sin(u_time * 5.0 + radial * 40.0);
     float wave2 = sin(u_time * 8.0 + radial * 80.0);
-    float wave3 = sin(u_time * 10.0 + radial * 120.0);
-    float combined_waves = (wave1 + wave2 + wave3) / 3.0;
+    float combined_waves = (wave1 + wave2) * 0.5;
 
-    // Color interior brillante, casi blanco-amarillo-naranja muy vivo
-    vec3 bright_inner = mix(u_ring_color_inner, vec3(1.0, 0.95, 0.4), 1.0);
+    // Color con transición simple entre interno y externo
+    vec3 bright_inner = mix(u_ring_color_inner, vec3(1.0, 0.95, 0.4), 0.8);
     vec3 base_color = mix(bright_inner, u_ring_color_outer, t);
 
-    // Alpha fuerte y con pulsos para brillo variable
+    // Alpha con forma de campana y pulso suave
     float alpha = exp(-pow((t - 0.5) * 2.0, 2.0) * u_ring_falloff);
-    alpha *= clamp(u_distortion_strength * 3.0, 0.0, 3.0) * (0.8 + 0.5 * combined_waves);
+    alpha *= (0.9 + 0.4 * combined_waves);
     alpha = clamp(alpha, 0.0, 1.0);
 
-    // Multiplicador de brillo potente y fresnel más marcado
-    vec3 final_color = base_color * (0.7 + 1.2 * f) * (1.0 + 0.8 * combined_waves) * u_distortion_strength * 5.0;
+    // Intensidad fuerte del color
+    vec3 final_color = base_color * u_distortion_strength * 4.0 * (1.0 + 0.5 * combined_waves);
 
-    fragColor = vec4(final_color, alpha * 1.0);
+    fragColor = vec4(final_color, alpha);
     if (fragColor.a < 0.01) discard;
 }
 
@@ -269,56 +237,26 @@ in vec3 v_normal;
 
 out vec4 FragColor;
 
-uniform vec3 u_blackhole_world_pos;
 uniform vec3 u_camera_position;
 uniform float u_distortion_strength;
 uniform float u_time;
 
-float fresnel(vec3 N, vec3 V) {
-    return pow(1.0 - max(dot(N, V), 0.0), 3.0);
-}
-
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
-float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-
-    vec2 u = f * f * (3.0 - 2.0 * f);
-
-    return mix(a, b, u.x) +
-           (c - a) * u.y * (1.0 - u.x) +
-           (d - b) * u.x * u.y;
-}
-
 void main() {
-    vec3 view_dir = normalize(u_camera_position - v_world_position);
     vec3 normal = normalize(v_normal);
-    float edge = fresnel(normal, view_dir);
 
-    // Dirección múltiple de ondas
-    float wave1 = sin(dot(normal, normalize(vec3(1.0, 0.5, 0.3))) * 8.0 + u_time * 1.5);
-    float wave2 = sin(dot(normal, normalize(vec3(-0.4, 1.0, 0.2))) * 10.0 + u_time * 1.2);
-    float wave3 = sin(dot(normal, normalize(vec3(0.3, -0.6, 1.0))) * 7.0 + u_time * 1.8);
+    // Simple ondas senoidales basadas en el normal y el tiempo
+    float wave1 = sin(dot(normal, vec3(1.0, 0.5, 0.3)) * 8.0 + u_time * 1.5);
+    float wave2 = sin(dot(normal, vec3(-0.4, 1.0, 0.2)) * 10.0 + u_time * 1.2);
+    float wave3 = sin(dot(normal, vec3(0.3, -0.6, 1.0)) * 7.0 + u_time * 1.8);
 
     float combined_waves = (wave1 + wave2 + wave3) / 3.0;
 
-    // Ruido sutil para desorganizar un poco
-    float n = noise(v_world_position.xy * 2.0 + u_time * 0.4) * 1.2;
+    // Intensidad base sin fresnel ni ruido
+    float intensity = clamp(0.5 + combined_waves * 0.5, 0.0, 1.0);
 
-    // Intensidad final
-    float intensity = clamp(0.4 + edge + combined_waves * 0.8 + n * 0.3, 0.0, 1.0);
-
-    // Color energético
-    vec3 glow_color = mix(vec3(1.0, 0.85, 0.2), vec3(1.0, 1.0, 0.6), intensity);
-    glow_color *= intensity * u_distortion_strength * 3.0;
+    // Color simple basado en la intensidad y la fuerza de distorsión, amplificado
+    float brightness_multiplier = 5.0;
+    vec3 glow_color = vec3(1.0, 0.85, 0.2) * intensity * u_distortion_strength * brightness_multiplier;
 
     FragColor = vec4(glow_color, 1.0);
 }
