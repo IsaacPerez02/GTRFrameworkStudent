@@ -209,8 +209,7 @@ void main() {
     alpha = clamp(alpha, 0.0, 1.0); // Clamp to avoid negatives or overflow
 
     // Final color boosted with distortion effect and wave modulation
-    vec3 final_color = base_color * u_distortion_strength * 4.0 * (1.0 + 0.5 * combined_waves);
-
+    vec3 final_color = vec3(0.50, 0.35, 0.1) * u_distortion_strength * 4.0 * (1.0 + 0.5 * combined_waves);
     fragColor = vec4(final_color, alpha);
 
     // Discard very transparent fragments to save performance
@@ -282,7 +281,7 @@ void main() {
 
     // Final color with boosted glow
     float brightness_multiplier = 5.0;
-    vec3 glow_color = vec3(1.0, 0.85, 0.2) * intensity * u_distortion_strength * brightness_multiplier;
+    vec3 glow_color = vec3(0.50, 0.35, 0.1) * intensity * u_distortion_strength * brightness_multiplier;
 
     FragColor = vec4(glow_color, 1.0);
 }
