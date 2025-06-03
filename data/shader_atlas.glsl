@@ -30,13 +30,13 @@ uniform float u_blackhole_radius;
 uniform float u_distortion_strength;
 uniform float u_effect_radius;
 
-uniform sampler2D u_scene_texture; // G-buffer color texture
-uniform sampler2D u_depth_texture; // G-buffer depth texture
+uniform sampler2D u_scene_texture; //G-buffer color texture
+uniform sampler2D u_depth_texture; //G-buffer depth texture
 
 
-uniform vec2 u_inv_screen_size; // Inverse of screen size for UV calculations
-uniform mat4 u_inv_viewprojection; // Inverse view-projection matrix for world position calculations
-uniform mat4 u_viewprojection; // View-projection matrix for converting world position to clip space
+uniform vec2 u_inv_screen_size; //inverse of screen size for UV calculations
+uniform mat4 u_inv_viewprojection; //inverse view-projection matrix for world position calculations
+uniform mat4 u_viewprojection; //view-projection matrix for converting world position to clip space
 
 void main()
 {
@@ -55,20 +55,18 @@ void main()
 	vec3 world_pos = not_norm_world_pos.xyz / not_norm_world_pos.w;
 
     
-	// Convert world pos to clip space
+	//convert world pos to clip space
     vec4 clip = u_viewprojection * vec4(u_blackhole_world_pos, 1.0);
     vec3 ndc = clip.xyz / clip.w;
 
-    // Convert NDC to screen-space pixel coords
     vec2 blackhole_screen_pos = (ndc.xy * 0.5 + 0.5) / u_inv_screen_size;
 
-    // Get this pixel's screen-space position
+    //get this pixel's screen-space position
     vec2 frag_screen_pos = gl_FragCoord.xy;
 
-    // Distance from black hole center
+    //distance from black hole center, for uv 
     float dist = distance(frag_screen_pos, blackhole_screen_pos);
 
-    // If inside black circle radius, return black
 	dist = length(blackhole_screen_pos - frag_screen_pos);
     if (dist < u_blackhole_radius*3) {
         FragColor = vec4(0.0, 0.0, 0.0, 1.0);
@@ -89,18 +87,15 @@ void main()
 	//float factor = (u_blackhole_radius - dist) / u_blackhole_radius;
     float strength = u_distortion_strength;// * factor;
 
-    // Approximate direction of distortion in screen-space (can be tweaked)
     vec2 dir = normalize(frag_screen_pos - blackhole_screen_pos);
 	//uv = frag_screen_pos;
 	vec2 right = vec2(dir.y, -dir.x);
 
-    uv += dir * strength/dist*dist * 0.2;
+    uv += dir * strength/dist*dist * 0.2; //based on distance to black hole center
 
-	uv += right * u_distortion_strength * 1/dist*dist * 0.2;
+	uv += right * u_distortion_strength * 1/dist*dist * 0.2; //perpendicular to dir
 	
 	//2D ring
-	
-		// Ring blending with scene
 	vec3 ring_color = vec3(1.0f, 0.8f, 0.3f);
 	float ring_inner_radius = u_effect_radius * 100.0 + 10.0;
 	float ring_thickness = u_effect_radius * 20.0;
