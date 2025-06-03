@@ -402,44 +402,6 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 			renderMantle(blackhole_model, &blackhole_sphere, nullptr);
 			renderBlackHole3D(blackhole_model, &blackhole_sphere, nullptr);
 			renderRing(blackhole_model, ringMesh, nullptr);
-
-			if (ringShader && ringMesh) {
-				glEnable(GL_DEPTH_TEST);
-				glEnable(GL_BLEND);
-				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-				float radioFotones = black_hole_radius * 1.0f;
-				float radioMedioBase = 1.1f;
-				float escalaXZ = radioFotones * radioMedioBase;
-				float escalaY = u_ring_thickness * black_hole_radius;
-
-				Matrix44 ringModel;
-				ringModel.setTranslation(black_hole_pos.x, black_hole_pos.y, black_hole_pos.z);
-				ringModel.scale(escalaXZ, escalaY, escalaXZ);
-
-				ringShader->enable();
-
-
-				ringShader->setUniform("u_model", ringModel);
-
-				ringShader->setUniform("u_viewprojection", Camera::current->viewprojection_matrix);
-				ringShader->setUniform("u_camera_position", Camera::current->eye);
-				ringShader->setUniform("u_ring_color_inner", vec3(1.0f, 0.8f, 0.3f));
-				ringShader->setUniform("u_ring_color_outer", vec3(1.0f, 0.3f, 0.1f));
-				ringShader->setUniform("u_ring_radius_inner", u_ring_rad_inn);
-				ringShader->setUniform("u_ring_radius_outer", u_ring_rad_out);
-				ringShader->setUniform("u_ring_thickness", u_ring_thickness);
-				ringShader->setUniform("u_ring_falloff", 4.0f);
-				ringShader->setUniform("u_distortion_strength", black_hole_strength);
-
-				fake_time += 1.0f / 60.0f;
-				ringShader->setUniform("u_time", fake_time);
-
-				ringMesh->render(GL_TRIANGLES);
-				ringShader->disable();
-
-				glDisable(GL_BLEND);
-			}
 		}
 		else {
 			vec3 blackhole_pos = vec3(1.0f, 1.0f, 1.0f);
@@ -1436,29 +1398,44 @@ void Renderer::blackHoleRender(const Matrix44 model, GFX::Mesh* mesh, SCN::Mater
 
 void Renderer::renderRing(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material)
 {
-	GFX::Shader* shader = GFX::Shader::Get("ring");
-	if (!shader || !mesh) return;
+	if (!ringShader || !mesh) return;
 
-	shader->enable();
+	float radioFotones = black_hole_radius * 1.0f;
+	float radioMedioBase = 1.1f;
+	float escalaXZ = radioFotones * radioMedioBase;
+	float escalaY = u_ring_thickness * black_hole_radius;
 
-	Camera* camera = Camera::current;
+	Matrix44 ringModel;
+	ringModel.setTranslation(black_hole_pos.x, black_hole_pos.y, black_hole_pos.z);
+	ringModel.scale(escalaXZ, escalaY, escalaXZ);
 
-	shader->setUniform("u_model", model);
-	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+	ringShader->enable();
 
+
+	ringShader->setUniform("u_model", ringModel);
+
+	ringShader->setUniform("u_viewprojection", Camera::current->viewprojection_matrix);
+	ringShader->setUniform("u_camera_position", Camera::current->eye);
+	ringShader->setUniform("u_ring_color_inner", vec3(1.0f, 0.8f, 0.3f));
+	ringShader->setUniform("u_ring_color_outer", vec3(1.0f, 0.3f, 0.1f));
+	ringShader->setUniform("u_ring_radius_inner", u_ring_rad_inn);
+	ringShader->setUniform("u_ring_radius_outer", u_ring_rad_out);
+	ringShader->setUniform("u_ring_thickness", u_ring_thickness);
+	ringShader->setUniform("u_ring_falloff", 4.0f);
+	ringShader->setUniform("u_distortion_strength", black_hole_strength);
+
+	fake_time += 1.0f / 60.0f;
+	ringShader->setUniform("u_time", fake_time);
+	
 	glEnable(GL_DEPTH_TEST);
-	glDepthMask(GL_TRUE);
-	glEnable(GL_BLEND);  // <- Activa el blending aquí
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);  // <- Define la función de mezcla para transparencia
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-	mesh->render(GL_TRIANGLES);
+	ringMesh->render(GL_TRIANGLES);
+	ringShader->disable();
 
-	glDisable(GL_BLEND);  // Opcional: desactiva el blending después de dibujar si no lo necesitas para otros objetos
-
-
-	shader->disable();
+	glDisable(GL_BLEND);
 }
-
 
 void Renderer::renderMantle(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material) {
 	GFX::Shader* shader = GFX::Shader::Get("mantle");
