@@ -413,7 +413,7 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 			blackhole.GFX::Mesh::createSphere(5, 10, 10);
 			blackhole_com.mesh = &blackhole;
 
-			// Position the sphere
+			//position the sphere
 			blackhole_com.model.translate(blackhole_pos.x, blackhole_pos.y, blackhole_pos.z);
 
 
@@ -1490,7 +1490,7 @@ void Renderer::blackHoleRender2D(const Matrix44 model, GFX::Mesh* mesh, SCN::Mat
 	shader->enable();
 
 
-	shader->setTexture("u_scene_texture", final_render_FBO.color_textures[0], 0);
+	shader->setTexture("u_scene_texture", final_render_FBO.color_textures[0], 0); //final render in FBO
 	shader->setTexture("u_depth_texture", gbuffer_FBO.depth_texture, 1); // needed to reconstruct world pos
 
 
@@ -1512,7 +1512,7 @@ void Renderer::blackHoleRender2D(const Matrix44 model, GFX::Mesh* mesh, SCN::Mat
 	shader->setUniform("u_blackhole_radius", OscillateValue(black_hole_radius2d, 0.2f, 100.0f));
 	shader->setUniform("u_distortion_strength", OscillateValue(black_hole_strength2d, 0.005f, 100.0f));
 	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	//mesh->render(GL_TRIANGLES); efecto guapisimo
+	//mesh->render(GL_TRIANGLES); efecto guapisimo (dont now if the effect work anymore)
 	quad->render(GL_TRIANGLES);
 	shader->disable();
 }
