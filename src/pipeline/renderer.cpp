@@ -1,4 +1,4 @@
-#include "renderer.h"
+ï»¿#include "renderer.h"
 
 #include <algorithm> //sort
 
@@ -19,7 +19,7 @@
 
 // A draw command: holds a mesh, a material, and its model matrix
 struct sDrawCommand {
-	GFX::Mesh* mesh;           // The object’s mesh (geometry)
+	GFX::Mesh* mesh;           // The objectï¿½s mesh (geometry)
 	SCN::Material* material;   // The material used to draw it
 	Matrix44 model;            // Transformation from object space to world space
 };
@@ -40,15 +40,22 @@ std::vector<sDrawCommand> lightSpheres; // Assignment 4
 
 
 
+bool black_hole_2d_or_3d = false;
+float black_hole_radius2d = 5.0f; // Radius of the black hole sphere
+float black_hole_strength2d = 0.2f; // Strength of the black hole effect
+vec3 black_hole_pos2d = vec3(1.0f, 1.0f, 1.0f); // Position of the black hole
+float black_hole_effect_radius2d = 1.0f; // Radius of the black hole effect area
+float u_ring_thickness2d = 0.1f;
 
-float black_hole_radius = 5.0f; // Radius of the black hole sphere
-float black_hole_strength = 0.2f; // Strength of the black hole effect
+float black_hole_radius = 0.5f; // Radius of the black hole sphere
+float black_hole_strength = 0.3f; // Strength of the black hole effect
 vec3 black_hole_pos = vec3(1.0f, 1.0f, 1.0f); // Position of the black hole
-float black_hole_effect_radius = 1.0f; // Radius of the black hole effect area
+float black_hole_effect_radius = 4.0f; // Radius of the black hole effect area
 GFX::Shader* ringShader = nullptr;
 float u_ring_thickness = 0.1f;
-bool black_hole_2d_or_3d = false;
-
+float u_ring_rad_inn = 0.3f;
+float u_ring_rad_out = 0.5f;
+static float fake_time = 0.0f;
 
 // If true, use multipass rendering (e.g., per-light passes)
 bool use_multipass = false;
@@ -83,7 +90,7 @@ GFX::FBO lighting_FBO;
 //store final render
 GFX::FBO final_render_FBO;
 
-// Assignment 6 – SSAO FBO
+// Assignment 6 ï¿½ SSAO FBO
 GFX::FBO ssao_FBO;
 
 // SSAO shader
@@ -163,19 +170,19 @@ Renderer::Renderer(const char* shader_atlas_filename)
 		GL_RGBA, // Each texture has an R G B and A channels
 		GL_FLOAT, // Uses 8 bits per channel, we have to try more
 		true);
-	// SSAO FBO (solo un canal, puedes hacerlo a mitad de resolución si quieres)
+	// SSAO FBO (solo un canal, puedes hacerlo a mitad de resoluciï¿½n si quieres)
 	ssao_FBO.create(
 		gbuffer_FBO.width,                   // ancho del FBO
 		gbuffer_FBO.height,                  // alto del FBO
 		1,                                   // solo una textura
-		GL_RGB,                              // canal único R
+		GL_RGB,                              // canal ï¿½nico R
 		GL_UNSIGNED_BYTE,                    // 8 bits, suficiente para AO
 		false                                // sin depth buffer
 	);
 	final_render_FBO.create(
 		1024, 768,                  // alto del FBO
 		1,                                   // solo una textura
-		GL_RGBA,                              // canal único R
+		GL_RGBA,                              // canal ï¿½nico R
 		GL_FLOAT,                    // 8 bits, suficiente para AO
 		true
 	);
@@ -253,7 +260,7 @@ void Renderer::parseNodes(SCN::Node* node, Camera* cam) {
 
 			//std::cout << "Nodo fuera de frustum: " << node->name << std::endl;
 
-		//	return; // está fuera del frustum, no lo renderizamos
+		//	return; // estï¿½ fuera del frustum, no lo renderizamos
 		}
 
 		// Create a draw command for this mesh
@@ -324,7 +331,7 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 	if (use_ssao) {
 		renderSSAO(camera);
 		ssao_FBO.color_textures[0]->toViewport();
-		// opcional: un blur o upsample aquí si implementas 2.6
+		// opcional: un blur o upsample aquï¿½ si implementas 2.6
 		return;
 	}
 
@@ -365,12 +372,11 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 
 		Renderer::rendertoLightFBO(); //True for first pass(directional and ambient only)
 
-		/*
-		for (sDrawCommand command : transparentNodes) {
-			Renderer::renderMeshWithMaterial(command.model, command.mesh, command.material);
-		}
-		*/
 		if (black_hole_2d_or_3d) {
+			for (sDrawCommand command : transparentNodes) {
+				Renderer::renderMeshWithMaterial(command.model, command.mesh, command.material);
+			}
+
 			//BlackHole
 			vec3 blackhole_pos = vec3(1.0f, 1.0f, 1.0f);
 
@@ -388,12 +394,14 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 			blackhole_model.setTranslation(black_hole_pos.x, black_hole_pos.y, black_hole_pos.z);
 			blackhole_model.scale(black_hole_radius, black_hole_radius, black_hole_radius);
 
-			// Llamamos a la nueva función
+			// Llamamos a la nueva funciï¿½n
 			final_render_FBO.color_textures[0]->toViewport(); // muestra la escena
 
 			applyBlackholePostProcessing();
 
-			renderBlackHole3D(blackhole_model, &blackhole_sphere, nullptr); // dibuja encima
+			renderMantle(blackhole_model, &blackhole_sphere, nullptr);
+			renderBlackHole3D(blackhole_model, &blackhole_sphere, nullptr);
+			renderRing(blackhole_model, ringMesh, nullptr);
 
 			if (ringShader && ringMesh) {
 				glEnable(GL_DEPTH_TEST);
@@ -418,18 +426,22 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 				ringShader->setUniform("u_camera_position", Camera::current->eye);
 				ringShader->setUniform("u_ring_color_inner", vec3(1.0f, 0.8f, 0.3f));
 				ringShader->setUniform("u_ring_color_outer", vec3(1.0f, 0.3f, 0.1f));
+				ringShader->setUniform("u_ring_radius_inner", u_ring_rad_inn);
+				ringShader->setUniform("u_ring_radius_outer", u_ring_rad_out);
 				ringShader->setUniform("u_ring_thickness", u_ring_thickness);
 				ringShader->setUniform("u_ring_falloff", 4.0f);
+				ringShader->setUniform("u_distortion_strength", black_hole_strength);
+
+				fake_time += 1.0f / 60.0f;
+				ringShader->setUniform("u_time", fake_time);
 
 				ringMesh->render(GL_TRIANGLES);
 				ringShader->disable();
 
 				glDisable(GL_BLEND);
 			}
-			
 		}
 		else {
-			//BlackHole
 			vec3 blackhole_pos = vec3(1.0f, 1.0f, 1.0f);
 
 			sDrawCommand blackhole_com;
@@ -448,8 +460,6 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 
 			Renderer::blackHoleRender2D(blackhole_com.model, blackhole_com.mesh, blackhole_com.material, blackhole_com.model.getTranslation());
 		}
-
-		//applyBlackholePostProcessing();
 
 	}
 
@@ -896,11 +906,18 @@ void Renderer::showUI()
 
 	ImGui::Checkbox("Deferred Rendering", &use_deferred_rendering);
 	ImGui::Separator();
-	ImGui::Checkbox("BlackHole 2d or 3d", &black_hole_2d_or_3d);
+	ImGui::Checkbox("Black Hole 2D or 3D", &black_hole_2d_or_3d);
+	ImGui::SliderFloat("2D Black Hole Radius", &black_hole_radius2d, 0.1f, 10.0f, "%.1f");
+	ImGui::SliderFloat("2D Black Hole Effect Radius", &black_hole_effect_radius2d, 0.3f, 10.0f, "%.1f");
+	ImGui::SliderFloat("2D Black Hole Strength", &black_hole_strength2d, 0.2f, 1.0f, "%.2f");
+	ImGui::InputFloat3("2D Black Hole Position", &black_hole_pos2d.x, "%.2f");
+	ImGui::Separator();
 	ImGui::SliderFloat("Black Hole Radius", &black_hole_radius, 0.1f, 10.0f, "%.1f");
-	ImGui::SliderFloat("Black Hole Effect Radius", &black_hole_effect_radius, 0.1f, 5.0f, "%.1f");
-	ImGui::SliderFloat("Black Hole Strength", &black_hole_strength, 0.0f, 1.0f, "%.2f");
+	ImGui::SliderFloat("Black Hole Effect Radius", &black_hole_effect_radius, 0.3f, 10.0f, "%.1f");
+	ImGui::SliderFloat("Black Hole Strength", &black_hole_strength, 0.2f, 1.0f, "%.2f");
 	ImGui::SliderFloat("Ring Thickness", &u_ring_thickness, 0.01f, 2.0f, "%.2f");
+	ImGui::SliderFloat("Ring Radius Inner", &u_ring_rad_inn, 0.2f, 0.4f, "%.2f");
+	ImGui::SliderFloat("Ring Radius Outer", &u_ring_rad_out, 0.4f, 0.7f, "%.2f");
 	ImGui::InputFloat3("Black Hole Position", &black_hole_pos.x, "%.2f");
 	ImGui::Separator();
 	ImGui::Checkbox("Ditering", &ditering);
@@ -929,12 +946,12 @@ void Renderer::showUI()
 		ImGui::SliderFloat("SSAO Radius", &ssao_radius, 0.0f, 0.2f, "%.3f");
 		ImGui::Checkbox("SSAO+", &use_ssao_plus);
 
-		// Si cambió el número de muestras o el modo, regeneramos el kernel
+		// Si cambiï¿½ el nï¿½mero de muestras o el modo, regeneramos el kernel
 		if (ssao_sample_count != prev_samples || use_ssao_plus != prev_plus) {
 			ssao_kernel = generateSpherePoints(
 				ssao_sample_count,      // nueva cuenta de muestras
 				1.0f,                   // radio fijo en CPU
-				use_ssao_plus           // hemisferio si “+” está activo
+				use_ssao_plus           // hemisferio si ï¿½+ï¿½ estï¿½ activo
 			);
 			prev_samples = ssao_sample_count;
 			prev_plus = use_ssao_plus;
@@ -1375,48 +1392,15 @@ void Renderer::createSpheresOfLights(std::vector<SCN::LightEntity*> lights) {
 		}
 	}
 }
-void Renderer::blackHoleRender2D(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, vec3 pos_hole) {
-	GFX::Mesh* quad = GFX::Mesh::getQuad(); // screen-space quad
 
-	GFX::Shader* shader = GFX::Shader::Get("black_hole2D");
-	if (!shader || !quad)
-		return;
-
-	shader->enable();
-
-
-	shader->setTexture("u_scene_texture", final_render_FBO.color_textures[0], 0);
-	shader->setTexture("u_depth_texture", gbuffer_FBO.depth_texture, 1); // needed to reconstruct world pos
-
-
-
-	shader->setUniform3("u_blackhole_world_pos", black_hole_pos);
-
-
-	Camera* camera = Camera::current;
-	Matrix44 inv_viewproj = camera->viewprojection_matrix;
-	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
-	inv_viewproj.inverse(); // make sure it's correct
-	shader->setUniform("u_inv_viewprojection", inv_viewproj);
-
-
-	shader->setUniform("u_inv_screen_size", Vector2f(1.0f / final_render_FBO.width, 1.0f / final_render_FBO.height));
-
-
-	shader->setUniform("u_effect_radius", black_hole_effect_radius);
-	shader->setUniform("u_blackhole_radius", OscillateValue(black_hole_radius, 0.2f, 100.0f));
-	shader->setUniform("u_distortion_strength", OscillateValue(black_hole_strength, 0.05f, 100.0f));
-	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-	//mesh->render(GL_TRIANGLES); efecto guapisimo
-	quad->render(GL_TRIANGLES);
-	shader->disable();
-}
 void Renderer::blackHoleRender(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, vec3 pos_hole) {
 	GFX::Mesh* quad = GFX::Mesh::getQuad(); // screen-space quad
 
 	GFX::Shader* shader = GFX::Shader::Get("black_hole");
 	if (!shader || !quad)
 		return;
+
+
 
 	shader->enable();
 
@@ -1452,6 +1436,109 @@ void Renderer::blackHoleRender(const Matrix44 model, GFX::Mesh* mesh, SCN::Mater
 	shader->disable();
 }
 
+void Renderer::renderRing(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material)
+{
+	GFX::Shader* shader = GFX::Shader::Get("ring");
+	if (!shader || !mesh) return;
+
+	shader->enable();
+
+	Camera* camera = Camera::current;
+
+	shader->setUniform("u_model", model);
+	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+	glEnable(GL_BLEND);  // <- Activa el blending aquÃ­
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);  // <- Define la funciÃ³n de mezcla para transparencia
+
+	mesh->render(GL_TRIANGLES);
+
+	glDisable(GL_BLEND);  // Opcional: desactiva el blending despuÃ©s de dibujar si no lo necesitas para otros objetos
+
+
+	shader->disable();
+}
+
+
+void Renderer::renderMantle(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material) {
+	GFX::Shader* shader = GFX::Shader::Get("mantle");
+	if (!shader || !mesh) return;
+
+	shader->enable();
+
+	Camera* camera = Camera::current;
+
+	shader->setUniform("u_model", model);
+	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+
+	shader->setUniform("u_blackhole_world_pos", black_hole_pos);
+	shader->setUniform("u_camera_position", camera->eye);
+	shader->setUniform("u_blackhole_radius", 0.75f + black_hole_radius);
+	shader->setUniform("u_effect_radius", black_hole_effect_radius);
+	shader->setUniform("u_distortion_strength", black_hole_strength);
+
+	shader->setTexture("u_scene_texture", final_render_FBO.color_textures[0], 0);
+	shader->setTexture("u_depth_texture", gbuffer_FBO.depth_texture, 1);
+
+	shader->setUniform("u_inv_screen_size", Vector2f(1.0f / final_render_FBO.width, 1.0f / final_render_FBO.height));
+	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+
+	fake_time += 1.0f / 60.0f;
+	shader->setUniform("u_time", fake_time);
+
+	Matrix44 inv_vp = camera->viewprojection_matrix;
+	inv_vp.inverse();
+	shader->setUniform("u_inv_viewprojection", inv_vp);
+
+
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+	glDisable(GL_BLEND);
+
+
+	mesh->render(GL_TRIANGLES);
+
+	shader->disable();
+}
+
+void Renderer::blackHoleRender2D(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material, vec3 pos_hole) {
+	GFX::Mesh* quad = GFX::Mesh::getQuad(); // screen-space quad
+
+	GFX::Shader* shader = GFX::Shader::Get("black_hole2D");
+	if (!shader || !quad)
+		return;
+
+	shader->enable();
+
+
+	shader->setTexture("u_scene_texture", final_render_FBO.color_textures[0], 0);
+	shader->setTexture("u_depth_texture", gbuffer_FBO.depth_texture, 1); // needed to reconstruct world pos
+
+
+
+	shader->setUniform3("u_blackhole_world_pos", black_hole_pos2d);
+
+
+	Camera* camera = Camera::current;
+	Matrix44 inv_viewproj = camera->viewprojection_matrix;
+	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
+	inv_viewproj.inverse(); // make sure it's correct
+	shader->setUniform("u_inv_viewprojection", inv_viewproj);
+
+
+	shader->setUniform("u_inv_screen_size", Vector2f(1.0f / final_render_FBO.width, 1.0f / final_render_FBO.height));
+
+
+	shader->setUniform("u_effect_radius", black_hole_effect_radius2d);
+	shader->setUniform("u_blackhole_radius", OscillateValue(black_hole_radius2d, 0.2f, 100.0f));
+	shader->setUniform("u_distortion_strength", OscillateValue(black_hole_strength2d, 0.005f, 100.0f));
+	glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	//mesh->render(GL_TRIANGLES); efecto guapisimo
+	quad->render(GL_TRIANGLES);
+	shader->disable();
+}
 void Renderer::renderBlackHole3D(const Matrix44 model, GFX::Mesh* mesh, SCN::Material* material) {
 	GFX::Shader* shader = GFX::Shader::Get("blackhole3d");
 	if (!shader || !mesh) return;
@@ -1482,53 +1569,48 @@ void Renderer::renderBlackHole3D(const Matrix44 model, GFX::Mesh* mesh, SCN::Mat
 	shader->setUniform("u_inv_viewprojection", inv_vp);
 
 
-	glEnable(GL_DEPTH_TEST);
-	glDepthMask(GL_TRUE);
-
-	glDisable(GL_BLEND);
+	glDisable(GL_DEPTH_TEST);
+	glDepthMask(GL_FALSE);
+	glEnable(GL_BLEND);
 
 	mesh->render(GL_TRIANGLES);
+
+	glDisable(GL_BLEND);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
 
 	shader->disable();
 }
 
-// Renderer.cpp (método adicional claramente separado para post-procesado)
+// Renderer.cpp (mï¿½todo adicional claramente separado para post-procesado)
 
 void Renderer::applyBlackholePostProcessing() {
-
 	GFX::Shader* shader = GFX::Shader::Get("black_hole");
 	GFX::Mesh* quad = GFX::Mesh::getQuad();
-
 	if (!shader || !quad)
 		return;
-
 	shader->enable();
-
 	shader->setTexture("u_scene_texture", final_render_FBO.color_textures[0], 0);
 	shader->setTexture("u_depth_texture", gbuffer_FBO.depth_texture, 1);
-
 	shader->setUniform3("u_blackhole_world_pos", black_hole_pos);
 	shader->setUniform("u_blackhole_radius", black_hole_radius);
 	shader->setUniform("u_effect_radius", black_hole_effect_radius);
 	shader->setUniform("u_distortion_strength", black_hole_strength);
-
+	shader->setUniform("u_ring_falloff", 4.0f);
+	shader->setUniform("u_ring_color_inner", vec3(1.0f, 0.8f, 0.3f));
+	shader->setUniform("u_ring_color_outer", vec3(1.0f, 0.3f, 0.1f));
 	Camera* camera = Camera::current;
 	Matrix44 inv_viewproj = camera->viewprojection_matrix;
 	inv_viewproj.inverse();
-
 	shader->setUniform("u_viewprojection", camera->viewprojection_matrix);
 	shader->setUniform("u_inv_viewprojection", inv_viewproj);
 	shader->setUniform("u_inv_screen_size", Vector2f(1.0f / final_render_FBO.width, 1.0f / final_render_FBO.height));
 	shader->setUniform("u_camera_position", camera->eye);
-
 	glDisable(GL_DEPTH_TEST);
 	glDepthMask(GL_FALSE);
-
 	quad->render(GL_TRIANGLES);
-
 	glEnable(GL_DEPTH_TEST);
 	glDepthMask(GL_TRUE);
-
 	shader->disable();
 }
 

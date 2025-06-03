@@ -13,10 +13,10 @@ brdf basic.vs brdf.fs
 ssao quad.vs ssao.fs
 ssao_blur quad.vs ssao_blur.fs
 black_hole quad.vs blackhole.fs
-blackhole3d blackhole3d.vs blackhole3d.fs
 black_hole2D quad.vs blackhole2D.fs
-ring blackhole3d.vs ring.fs
-
+blackhole3d blackhole3d.vs blackhole3d.fs
+mantle mantle.vs mantle.fs
+ring ring.vs ring.fs
 
 \blackhole2D.fs
 #version 330 core
@@ -74,6 +74,7 @@ void main()
         FragColor = vec4(0.0, 0.0, 0.0, 1.0);
         return;
     }
+	
 	if (dist < u_blackhole_radius*3.1) {
         FragColor = vec4(1.0f, 0.8f, 0.3f,1.0);
         return;
@@ -95,7 +96,7 @@ void main()
 
     uv += dir * strength/dist*dist * 0.2;
 
-	uv += right * u_distortion_strength * 0.3/dist*dist * 0.2;
+	uv += right * u_distortion_strength * 1/dist*dist * 0.2;
 	
 	//2D ring
 	
@@ -128,7 +129,6 @@ void main()
 	
 	
 
-
 	dist = length(blackhole_screen_pos - frag_screen_pos);
 	color -= vec4(u_distortion_strength *25 /dist); //black aura
 	
@@ -136,45 +136,7 @@ void main()
     FragColor = color;
 }
 
-\ring.fs
-#version 330 core
-
-in vec3  v_world_position;
-in vec3  v_normal;
-in vec2  v_uv;
-
-uniform vec3  u_camera_position;
-uniform vec3  u_ring_color_inner;
-uniform vec3  u_ring_color_outer;
-uniform float u_ring_thickness;
-uniform float u_ring_falloff;
-
-out vec4 fragColor;
-
-float fresnel_term(vec3 N, vec3 V) {
-    return pow(1.0 - max(dot(N, V), 0.0), 3.0);
-}
-
-void main() {
-    vec3 view_dir = normalize(u_camera_position - v_world_position);
-    vec3 N = normalize(v_normal);
-
-    float f = fresnel_term(N, view_dir);
-
-    float radial = abs(v_uv.y - 0.5) * 2.0;
-    float t = clamp((radial - (1.0 - u_ring_thickness)) / u_ring_thickness, 0.0, 1.0);
-
-    vec3 base_color = mix(u_ring_color_inner, u_ring_color_outer, t);
-    float alpha = exp(-pow((t - 0.5) * 2.0, 2.0) * u_ring_falloff);
-
-    vec3 final_color = base_color * (0.4 + 0.6 * f);
-    fragColor = vec4(final_color, alpha * 0.9);
-
-    if (fragColor.a < 0.01) discard;
-}
-
-
-\blackhole3d.vs
+\ring.vs
 #version 330 core
 
 in vec3 a_vertex;
@@ -199,6 +161,188 @@ void main() {
     gl_Position = u_viewprojection * world_pos;
 }
 
+
+\ring.fs
+#version 330 core
+
+in vec3 v_world_position;
+in vec3 v_normal;
+in vec2 v_uv;
+
+uniform vec3  u_camera_position;
+uniform vec3  u_ring_color_inner;
+uniform vec3  u_ring_color_outer;
+uniform float u_ring_radius_inner;
+uniform float u_ring_radius_outer;  
+uniform float u_ring_falloff;
+uniform float u_distortion_strength;
+uniform float u_time;
+
+out vec4 fragColor;
+
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(12.9898,78.233))) * 43758.5453);
+}
+
+float fresnel_term(vec3 N, vec3 V) {
+    return pow(1.0 - max(dot(N, V), 0.0), 5.0);  // Más fuerte (potencia 5)
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+
+    vec2 u = f*f*(3.0-2.0*f);
+
+    return mix(a, b, u.x) + (c - a)*u.y*(1.0 - u.x) + (d - b)*u.x*u.y;
+}
+
+void main() {
+    vec3 view_dir = normalize(u_camera_position - v_world_position);
+    vec3 N = normalize(v_normal);
+
+    float f = fresnel_term(N, view_dir);
+
+    vec2 uv_centered = v_uv - vec2(0.5);
+    float radial = length(uv_centered);
+
+    float n = noise(uv_centered * 30.0 + u_time * 3.0);
+    float dynamic_offset = 0.03 * n + 0.03 * u_distortion_strength;
+
+    float r_inner = u_ring_radius_inner - dynamic_offset;
+    float r_outer = u_ring_radius_outer + dynamic_offset;
+
+    float t = smoothstep(r_inner, r_outer, radial);
+
+    float wave1 = sin(u_time * 5.0 + radial * 40.0);
+    float wave2 = sin(u_time * 8.0 + radial * 80.0);
+    float wave3 = sin(u_time * 10.0 + radial * 120.0);
+    float combined_waves = (wave1 + wave2 + wave3) / 3.0;
+
+    // Color interior brillante, casi blanco-amarillo-naranja muy vivo
+    vec3 bright_inner = mix(u_ring_color_inner, vec3(1.0, 0.95, 0.4), 1.0);
+    vec3 base_color = mix(bright_inner, u_ring_color_outer, t);
+
+    // Alpha fuerte y con pulsos para brillo variable
+    float alpha = exp(-pow((t - 0.5) * 2.0, 2.0) * u_ring_falloff);
+    alpha *= clamp(u_distortion_strength * 3.0, 0.0, 3.0) * (0.8 + 0.5 * combined_waves);
+    alpha = clamp(alpha, 0.0, 1.0);
+
+    // Multiplicador de brillo potente y fresnel más marcado
+    vec3 final_color = base_color * (0.7 + 1.2 * f) * (1.0 + 0.8 * combined_waves) * u_distortion_strength * 5.0;
+
+    fragColor = vec4(final_color, alpha * 1.0);
+    if (fragColor.a < 0.01) discard;
+}
+
+\mantle.vs
+#version 330 core
+
+in vec3 a_vertex;
+in vec3 a_normal;
+
+uniform mat4 u_model;
+uniform mat4 u_viewprojection;
+uniform float u_blackhole_radius;
+
+out vec3 v_world_position;
+out vec3 v_normal;
+
+void main() {
+    vec3 scaled_vertex = a_vertex * u_blackhole_radius; // escala aquí
+    vec4 world_pos = u_model * vec4(scaled_vertex, 1.0);
+    v_world_position = world_pos.xyz;
+    v_normal = mat3(u_model) * a_normal;
+    gl_Position = u_viewprojection * world_pos;
+}
+
+\mantle.fs
+#version 330 core
+
+in vec3 v_world_position;
+in vec3 v_normal;
+
+out vec4 FragColor;
+
+uniform vec3 u_blackhole_world_pos;
+uniform vec3 u_camera_position;
+uniform float u_distortion_strength;
+uniform float u_time;
+
+float fresnel(vec3 N, vec3 V) {
+    return pow(1.0 - max(dot(N, V), 0.0), 3.0);
+}
+
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+
+    vec2 u = f * f * (3.0 - 2.0 * f);
+
+    return mix(a, b, u.x) +
+           (c - a) * u.y * (1.0 - u.x) +
+           (d - b) * u.x * u.y;
+}
+
+void main() {
+    vec3 view_dir = normalize(u_camera_position - v_world_position);
+    vec3 normal = normalize(v_normal);
+    float edge = fresnel(normal, view_dir);
+
+    // Dirección múltiple de ondas
+    float wave1 = sin(dot(normal, normalize(vec3(1.0, 0.5, 0.3))) * 8.0 + u_time * 1.5);
+    float wave2 = sin(dot(normal, normalize(vec3(-0.4, 1.0, 0.2))) * 10.0 + u_time * 1.2);
+    float wave3 = sin(dot(normal, normalize(vec3(0.3, -0.6, 1.0))) * 7.0 + u_time * 1.8);
+
+    float combined_waves = (wave1 + wave2 + wave3) / 3.0;
+
+    // Ruido sutil para desorganizar un poco
+    float n = noise(v_world_position.xy * 2.0 + u_time * 0.4) * 1.2;
+
+    // Intensidad final
+    float intensity = clamp(0.4 + edge + combined_waves * 0.8 + n * 0.3, 0.0, 1.0);
+
+    // Color energético
+    vec3 glow_color = mix(vec3(1.0, 0.85, 0.2), vec3(1.0, 1.0, 0.6), intensity);
+    glow_color *= intensity * u_distortion_strength * 3.0;
+
+    FragColor = vec4(glow_color, 1.0);
+}
+
+\blackhole3d.vs
+#version 330 core
+
+in vec3 a_vertex;
+in vec3 a_normal;
+
+uniform mat4 u_model;
+uniform mat4 u_viewprojection;
+
+out vec3 v_world_position;
+out vec3 v_normal;
+
+void main() {
+    vec4 world_pos = u_model * vec4(a_vertex, 1.0);
+    v_world_position = world_pos.xyz;
+    v_normal = mat3(u_model) * a_normal;
+    gl_Position = u_viewprojection * world_pos;
+}
+
+
 \blackhole3d.fs
 #version 330 core
 
@@ -210,6 +354,8 @@ out vec4 FragColor;
 uniform vec3 u_blackhole_world_pos;
 uniform vec3 u_camera_position;
 uniform float u_distortion_strength;
+uniform float u_blackhole_radius;     // necesario para saber qué es "centro"
+uniform float u_effect_radius;        // hasta dónde se aplica el efecto
 
 float fresnel(vec3 N, vec3 V) {
     return pow(1.0 - max(dot(N, V), 0.0), 3.0);
@@ -219,11 +365,25 @@ void main() {
     vec3 view_dir = normalize(u_camera_position - v_world_position);
     vec3 normal = normalize(v_normal);
 
-    float edge = fresnel(normal, view_dir);
-    vec3 glow_color = mix(vec3(1.0, 0.6, 0.2), vec3(1.0, 0.9, 0.6), edge);
-    glow_color *= edge * u_distortion_strength * 3.0;
+    float dist_to_center = length(v_world_position - u_blackhole_world_pos);
 
-    FragColor = vec4(glow_color, 1.0);
+    // Si está dentro del horizonte de sucesos => negro absoluto
+    if (dist_to_center < u_blackhole_radius) {
+        FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+
+    // Cálculo del fresnel y efecto visual en el borde
+    float edge = fresnel(normal, view_dir);
+    float base_intensity = 0.2;
+
+    vec3 glow_color = mix(vec3(1.0, 0.6, 0.2), vec3(1.0, 0.9, 0.6), edge);
+    glow_color = max(glow_color, vec3(base_intensity));
+    glow_color *= edge * u_distortion_strength * 1.0;
+
+    // Fade si está cerca del borde del agujero negro
+    float fade = smoothstep(u_blackhole_radius, u_effect_radius, dist_to_center);
+    FragColor = vec4(glow_color * fade, 0.8 * fade);
 }
 
 
@@ -295,7 +455,6 @@ void main() {
     // 6) Ya no pintamos anillos 2D aquí. Solo devolvemos baseColor:
     FragColor = baseColor;
 }
-
 
 \PBR_functions
 vec3 fresnelSchlick(vec3 V, vec3 H, vec3 F0) {

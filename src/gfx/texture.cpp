@@ -219,8 +219,8 @@ namespace GFX
 		this->texture_type = GL_TEXTURE_CUBE_MAP;
 		this->mipmaps = mipmaps && isPowerOfTwo(width) && isPowerOfTwo(height) && format != GL_DEPTH_COMPONENT;
 
-		this->wrapS = GL_MIRRORED_REPEAT;
-		this->wrapT = GL_MIRRORED_REPEAT;
+		this->wrapS = GL_CLAMP_TO_EDGE;
+		this->wrapT = GL_CLAMP_TO_EDGE;
 
 		if (texture_id == 0)
 			glGenTextures(1, &texture_id); //we need to create an unique ID for the texture
@@ -344,8 +344,8 @@ namespace GFX
 		create(image->width, image->height, (image->num_channels == 3 ? GL_RGB : GL_RGBA), type, mipmaps, image->data, 0);
 
 		glBindTexture(this->texture_type, texture_id);	//we activate this id to tell opengl we are going to use this texture
-		glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_S, (this->mipmaps && wrap) ? GL_REPEAT : GL_MIRRORED_REPEAT);
-		glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_T, (this->mipmaps && wrap) ? GL_REPEAT : GL_MIRRORED_REPEAT);
+		glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_S, (this->mipmaps && wrap) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+		glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_T, (this->mipmaps && wrap) ? GL_REPEAT : GL_CLAMP_TO_EDGE);
 		//glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_S, GL_REPEAT);
 		//glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_T, GL_REPEAT);
 		//if (mipmaps)
@@ -385,8 +385,8 @@ namespace GFX
 
 		glTexParameteri(this->texture_type, GL_TEXTURE_MAG_FILTER, Texture::default_mag_filter);	//set the min filter
 		glTexParameteri(this->texture_type, GL_TEXTURE_MIN_FILTER, this->mipmaps ? Texture::default_min_filter : GL_LINEAR);   //set the mag filter
-		glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_S, this->mipmaps ? GL_MIRRORED_REPEAT : GL_MIRRORED_REPEAT); //Lo hemos puesto nosotros
-		glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_T, this->mipmaps ? GL_MIRRORED_REPEAT : GL_MIRRORED_REPEAT);
+		glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_S, this->mipmaps ? GL_CLAMP_TO_EDGE : GL_CLAMP_TO_EDGE); //Lo hemos puesto nosotros
+		glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_T, this->mipmaps ? GL_CLAMP_TO_EDGE : GL_CLAMP_TO_EDGE);
 		//glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, 4); //better quality but takes more resources
 
 		if (data && this->mipmaps)
@@ -447,8 +447,8 @@ namespace GFX
 		for (int i = 0; i < 6; i++)
 			glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, level, internal_format == 0 ? format : internal_format, w, h, 0, format, t, data ? data[i] : NULL);
 
-		glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_S, GL_MIRRORED_REPEAT);
-		glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT);
+		glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(this->texture_type, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 		bool bAllowMips = true;
 
