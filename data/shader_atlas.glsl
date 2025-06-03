@@ -139,28 +139,32 @@ void main()
 \ring.vs
 #version 330 core
 
-in vec3 a_vertex;
-in vec3 a_normal;
-in vec2 a_coord;
+in vec3 a_vertex;    // Vertex position in model space
+in vec3 a_normal;    // Vertex normal
+in vec2 a_coord;     // Texture coordinates (UVs)
 
-uniform mat4 u_model;
-uniform mat4 u_viewprojection;
+uniform mat4 u_model;              // Model matrix (object to world space)
+uniform mat4 u_viewprojection;     // Combined view-projection matrix
 
-out vec3 v_world_position;
-out vec3 v_normal;
-out vec4 v_color;
-out vec2 v_uv;
+out vec3 v_world_position;   // Vertex position in world space
+out vec3 v_normal;           // Transformed normal
+out vec4 v_color;            // Placeholder color (not used)
+out vec2 v_uv;               // Passed UV coordinates
 
 void main() {
+    // Transform vertex position to world space
     vec4 world_pos = u_model * vec4(a_vertex, 1.0);
     v_world_position = world_pos.xyz;
+
+    // Transform the normal without applying translation
     v_normal = (u_model * vec4(a_normal, 0.0)).xyz;
-    v_color = vec4(1.0); // not used
+
+    v_color = vec4(1.0); // Not used, could be removed
     v_uv = a_coord;
 
+    // Convert to clip space for rendering
     gl_Position = u_viewprojection * world_pos;
 }
-
 
 \ring.fs
 #version 330 core
@@ -169,65 +173,83 @@ in vec3 v_world_position;
 in vec3 v_normal;
 in vec2 v_uv;
 
-uniform vec3  u_camera_position;
-uniform vec3  u_ring_color_inner;
-uniform vec3  u_ring_color_outer;
-uniform float u_ring_radius_inner;
-uniform float u_ring_radius_outer;  
-uniform float u_ring_falloff;
-uniform float u_distortion_strength;
-uniform float u_time;
+uniform vec3  u_camera_position;     // Camera position (not currently used)
+uniform vec3  u_ring_color_inner;    // Inner ring color
+uniform vec3  u_ring_color_outer;    // Outer ring color
+uniform float u_ring_radius_inner;   // Inner radius of the ring
+uniform float u_ring_radius_outer;   // Outer radius of the ring
+uniform float u_ring_falloff;        // Alpha falloff intensity
+uniform float u_distortion_strength; // Strength of color/intensity modulation
+uniform float u_time;                // Time for animation
 
 out vec4 fragColor;
 
 void main() {
+    // Center UV coordinates
     vec2 uv_centered = v_uv - vec2(0.5);
-    float radial = length(uv_centered);
+    float radial = length(uv_centered); // Distance from center
 
-    // Simple mezcla radial
+    // Blend factor based on radial distance using smoothstep
     float t = smoothstep(u_ring_radius_inner, u_ring_radius_outer, radial);
 
-    // Ondas visuales básicas
-    float wave1 = sin(u_time * 5.0 + radial * 40.0);
-    float wave2 = sin(u_time * 8.0 + radial * 80.0);
+    // Radial waves using wave equation: sin(k * r - ω * t)
+    float frequency1 = 40.0;
+    float frequency2 = 80.0;
+    float speed1 = 5.0;
+    float speed2 = 8.0;
+
+    float wave1 = sin(frequency1 * radial - speed1 * u_time);
+    float wave2 = sin(frequency2 * radial - speed2 * u_time);
     float combined_waves = (wave1 + wave2) * 0.5;
 
-    // Color con transición simple entre interno y externo
+    // Create a bright inner color by mixing with a warm glow
     vec3 bright_inner = mix(u_ring_color_inner, vec3(1.0, 0.95, 0.4), 0.8);
-    vec3 base_color = mix(bright_inner, u_ring_color_outer, t);
+    vec3 base_color = mix(bright_inner, u_ring_color_outer, t); // Final base color
 
-    // Alpha con forma de campana y pulso suave
+    // Gaussian-like alpha (bell-shaped), fades toward edges
     float alpha = exp(-pow((t - 0.5) * 2.0, 2.0) * u_ring_falloff);
-    alpha *= (0.9 + 0.4 * combined_waves);
-    alpha = clamp(alpha, 0.0, 1.0);
 
-    // Intensidad fuerte del color
+    // Modulate alpha using the wave animation (gentle pulsing)
+    alpha *= (0.9 + 0.4 * combined_waves);
+    alpha = clamp(alpha, 0.0, 1.0); // Clamp to avoid negatives or overflow
+
+    // Final color boosted with distortion effect and wave modulation
     vec3 final_color = base_color * u_distortion_strength * 4.0 * (1.0 + 0.5 * combined_waves);
 
     fragColor = vec4(final_color, alpha);
+
+    // Discard very transparent fragments to save performance
     if (fragColor.a < 0.01) discard;
 }
 
 \mantle.vs
 #version 330 core
 
-in vec3 a_vertex;
-in vec3 a_normal;
+in vec3 a_vertex;    // Vertex position in object/model space
+in vec3 a_normal;    // Vertex normal in object space
 
-uniform mat4 u_model;
-uniform mat4 u_viewprojection;
-uniform float u_blackhole_radius;
+uniform mat4 u_model;              // Model transformation matrix
+uniform mat4 u_viewprojection;     // Combined view-projection matrix
+uniform float u_blackhole_radius;  // Scaling factor for black hole mantle
 
-out vec3 v_world_position;
-out vec3 v_normal;
+out vec3 v_world_position;   // Vertex position in world space
+out vec3 v_normal;           // Transformed normal
 
 void main() {
-    vec3 scaled_vertex = a_vertex * u_blackhole_radius; // escala aquí
+    // Scale the vertex to match the black hole radius
+    vec3 scaled_vertex = a_vertex * u_blackhole_radius;
+
+    // Transform scaled vertex to world space
     vec4 world_pos = u_model * vec4(scaled_vertex, 1.0);
     v_world_position = world_pos.xyz;
+
+    // Transform the normal to world space (ignore translation)
     v_normal = mat3(u_model) * a_normal;
+
+    // Project the world position to clip space
     gl_Position = u_viewprojection * world_pos;
 }
+
 
 \mantle.fs
 #version 330 core
@@ -244,17 +266,26 @@ uniform float u_time;
 void main() {
     vec3 normal = normalize(v_normal);
 
-    // Simple ondas senoidales basadas en el normal y el tiempo
-    float wave1 = sin(dot(normal, vec3(1.0, 0.5, 0.3)) * 8.0 + u_time * 1.5);
-    float wave2 = sin(dot(normal, vec3(-0.4, 1.0, 0.2)) * 10.0 + u_time * 1.2);
-    float wave3 = sin(dot(normal, vec3(0.3, -0.6, 1.0)) * 7.0 + u_time * 1.8);
+    // Parameters for wave equations
+    float k1 = 12.0;   // frequency (how tight the wave is)
+    float k2 = 18.0;
+    float k3 = 15.0;
+
+    float w1 = 2.0;    // angular speed (how fast it animates)
+    float w2 = 2.5;
+    float w3 = 1.8;
+
+    // Radial waves using wave equation: sin(k * r - ω * t)
+    float wave1 = sin(k1 * dot(normal, vec3(1.0, 0.5, 0.3)) - w1 * u_time);
+    float wave2 = sin(k2 * dot(normal, vec3(-0.4, 1.0, 0.2)) - w2 * u_time);
+    float wave3 = sin(k3 * dot(normal, vec3(0.3, -0.6, 1.0)) - w3 * u_time);
 
     float combined_waves = (wave1 + wave2 + wave3) / 3.0;
 
-    // Intensidad base sin fresnel ni ruido
+    // Wave-modulated intensity
     float intensity = clamp(0.5 + combined_waves * 0.5, 0.0, 1.0);
 
-    // Color simple basado en la intensidad y la fuerza de distorsión, amplificado
+    // Final color with boosted glow
     float brightness_multiplier = 5.0;
     vec3 glow_color = vec3(1.0, 0.85, 0.2) * intensity * u_distortion_strength * brightness_multiplier;
 
@@ -264,22 +295,26 @@ void main() {
 \blackhole3d.vs
 #version 330 core
 
-in vec3 a_vertex;
-in vec3 a_normal;
+in vec3 a_vertex;  // Vertex position in model space
+in vec3 a_normal;  // Normal vector in model space
 
-uniform mat4 u_model;
-uniform mat4 u_viewprojection;
+uniform mat4 u_model;           // Model matrix
+uniform mat4 u_viewprojection;  // View-projection matrix
 
-out vec3 v_world_position;
-out vec3 v_normal;
+out vec3 v_world_position;  // World-space position
+out vec3 v_normal;          // Transformed normal
 
 void main() {
+    // Transform vertex position to world space
     vec4 world_pos = u_model * vec4(a_vertex, 1.0);
     v_world_position = world_pos.xyz;
+
+    // Transform normal to world space using the model matrix 
     v_normal = mat3(u_model) * a_normal;
+
+    // Final position projected to clip space for rasterization
     gl_Position = u_viewprojection * world_pos;
 }
-
 
 \blackhole3d.fs
 #version 330 core
@@ -289,42 +324,31 @@ in vec3 v_normal;
 
 out vec4 FragColor;
 
-uniform vec3 u_blackhole_world_pos;
-uniform vec3 u_camera_position;
-uniform float u_distortion_strength;
-uniform float u_blackhole_radius;     // necesario para saber qué es "centro"
-uniform float u_effect_radius;        // hasta dónde se aplica el efecto
-
-float fresnel(vec3 N, vec3 V) {
-    return pow(1.0 - max(dot(N, V), 0.0), 3.0);
-}
+uniform vec3 u_blackhole_world_pos;   // World-space position of the black hole center
+uniform vec3 u_camera_position;       // Camera position (used for view direction)
+uniform float u_distortion_strength;  // Controls intensity of the visual distortion
+uniform float u_blackhole_radius;     // Event horizon radius (black core zone)
+uniform float u_effect_radius;        // Radius within which the glow/distortion is applied
 
 void main() {
-    vec3 view_dir = normalize(u_camera_position - v_world_position);
-    vec3 normal = normalize(v_normal);
-
+    // Compute distance from fragment to black hole center
     float dist_to_center = length(v_world_position - u_blackhole_world_pos);
 
-    // Si está dentro del horizonte de sucesos => negro absoluto
+    // Inside event horizon = fully black
     if (dist_to_center < u_blackhole_radius) {
         FragColor = vec4(0.0, 0.0, 0.0, 1.0);
         return;
     }
 
-    // Cálculo del fresnel y efecto visual en el borde
-    float edge = fresnel(normal, view_dir);
-    float base_intensity = 0.2;
+    // Base glow color around the black hole
+    vec3 glow_color = vec3(1.0, 0.8, 0.3) * u_distortion_strength;
 
-    vec3 glow_color = mix(vec3(1.0, 0.6, 0.2), vec3(1.0, 0.9, 0.6), edge);
-    glow_color = max(glow_color, vec3(base_intensity));
-    glow_color *= edge * u_distortion_strength * 1.0;
-
-    // Fade si está cerca del borde del agujero negro
+    // Radial fade from the event horizon to effect radius
     float fade = smoothstep(u_blackhole_radius, u_effect_radius, dist_to_center);
+
+    // Final glow color with smooth falloff and some transparency
     FragColor = vec4(glow_color * fade, 0.8 * fade);
 }
-
-
 \blackhole.fs
 #version 330 core
 
