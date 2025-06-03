@@ -48,11 +48,11 @@ float black_hole_effect_radius2d = 1.0f; // Radius of the black hole effect area
 float u_ring_thickness2d = 0.1f;
 
 float black_hole_radius = 0.5f; // Radius of the black hole sphere
-float black_hole_strength = 0.3f; // Strength of the black hole effect
+float black_hole_strength = 0.72f; // Strength of the black hole effect
 vec3 black_hole_pos = vec3(1.0f, 1.0f, 1.0f); // Position of the black hole
-float black_hole_effect_radius = 4.0f; // Radius of the black hole effect area
+float black_hole_effect_radius = 10.0f; // Radius of the black hole effect area
 GFX::Shader* ringShader = nullptr;
-float u_ring_thickness = 0.1f;
+float u_ring_thickness = 1.4f;
 float u_ring_rad_inn = 0.3f;
 float u_ring_rad_out = 0.5f;
 static float fake_time = 0.0f;
@@ -373,9 +373,11 @@ void Renderer::renderScene(SCN::Scene* scene, Camera* camera)
 		Renderer::rendertoLightFBO(); //True for first pass(directional and ambient only)
 
 		if (black_hole_2d_or_3d) {
+			/* could be done but it doenst look good, and is to much to put in final fbo (our gpu is not that good)
 			for (sDrawCommand command : transparentNodes) {
-				Renderer::renderMeshWithMaterial(command.model, command.mesh, command.material);
+			Renderer::renderMeshWithMaterial(command.model, command.mesh, command.material);
 			}
+			*/
 
 			//BlackHole
 			vec3 blackhole_pos = vec3(1.0f, 1.0f, 1.0f);
