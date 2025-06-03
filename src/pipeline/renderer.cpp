@@ -916,8 +916,6 @@ void Renderer::showUI()
 	ImGui::SliderFloat("Black Hole Effect Radius", &black_hole_effect_radius, 0.3f, 10.0f, "%.1f");
 	ImGui::SliderFloat("Black Hole Strength", &black_hole_strength, 0.2f, 1.0f, "%.2f");
 	ImGui::SliderFloat("Ring Thickness", &u_ring_thickness, 0.01f, 2.0f, "%.2f");
-	ImGui::SliderFloat("Ring Radius Inner", &u_ring_rad_inn, 0.2f, 0.4f, "%.2f");
-	ImGui::SliderFloat("Ring Radius Outer", &u_ring_rad_out, 0.4f, 0.7f, "%.2f");
 	ImGui::InputFloat3("Black Hole Position", &black_hole_pos.x, "%.2f");
 	ImGui::Separator();
 	ImGui::Checkbox("Ditering", &ditering);
